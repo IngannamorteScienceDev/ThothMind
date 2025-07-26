@@ -4,6 +4,8 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import shap
+import numpy as np
 
 # Добавим корень проекта
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -157,8 +159,29 @@ elif tab == "🧪 Tuning":
 
 # 📈 Вкладка: SHAP
 elif tab == "📈 SHAP":
-    st.header("📈 Explainable AI (SHAP)")
-    st.info("Раздел в разработке...")
+    st.header("📈 Explainable AI — SHAP Values")
+
+    df = load_ticker_data(ticker)
+    df_feat = generate_features(df)
+
+    st.info("Обучаем модель и рассчитываем значения SHAP...")
+    model, X_test, y_test, y_proba = train_classifier(df_feat)
+
+    explainer = shap.Explainer(model)
+    shap_values = explainer(X_test)
+
+    st.success("✅ SHAP значения рассчитаны")
+
+    st.subheader("📊 Важность признаков (summary bar)")
+    fig1 = shap.plots.bar(shap_values, show=False)
+    st.pyplot(fig1)
+
+    st.subheader("📋 Таблица: топ признаков по важности")
+    importance_df = pd.DataFrame({
+        "Feature": X_test.columns,
+        "Mean |SHAP|": np.abs(shap_values.values).mean(axis=0)
+    }).sort_values("Mean |SHAP|", ascending=False)
+    st.dataframe(importance_df.head(10))
 
 # 📥 Вкладка: Upload CSV
 elif tab == "📥 Upload CSV":
