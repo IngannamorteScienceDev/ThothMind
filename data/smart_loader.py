@@ -2,7 +2,7 @@ import pandas as pd
 import os
 import glob
 
-def load_ticker_data(ticker: str, base_path: str = "thothmind/data") -> pd.DataFrame:
+def load_ticker_data(ticker: str, base_path: str = "data") -> pd.DataFrame:
     """
     Загружает данные по тикеру из папок Stocks или ETFs.
     Преобразует колонку 'Date' в datetime и добавляет колонку 'ticker'.
@@ -20,7 +20,7 @@ def load_ticker_data(ticker: str, base_path: str = "thothmind/data") -> pd.DataF
             return df
     raise FileNotFoundError(f"{ticker} не найден в Stocks/ или ETFs/")
 
-def get_available_tickers(base_path: str = "thothmind/data") -> list:
+def get_available_tickers(base_path: str = "data") -> list:
     """
     Возвращает список всех доступных тикеров в директориях Stocks и ETFs.
     """

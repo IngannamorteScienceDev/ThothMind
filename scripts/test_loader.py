@@ -1,4 +1,10 @@
-from thothmind.data.smart_loader import (
+import sys
+import os
+
+# 👇 Добавляем папку проекта (корень) в PYTHONPATH
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from data.smart_loader import (
     load_ticker_data,
     get_available_tickers,
     describe_ticker,
