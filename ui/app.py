@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import shap
 import numpy as np
+import matplotlib.pyplot as plt
 
 # Добавим корень проекта
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -173,8 +174,10 @@ elif tab == "📈 SHAP":
     st.success("✅ SHAP значения рассчитаны")
 
     st.subheader("📊 Важность признаков (summary bar)")
-    fig1 = shap.plots.bar(shap_values, show=False)
-    st.pyplot(fig1)
+    fig, ax = plt.subplots(figsize=(10, 4))
+    shap.plots.bar(shap_values, show=False)
+    st.pyplot(plt.gcf())  # Получаем текущую фигуру и рендерим её
+    plt.clf()  # Очищаем, чтобы не накапливались графики
 
     st.subheader("📋 Таблица: топ признаков по важности")
     importance_df = pd.DataFrame({
@@ -185,8 +188,64 @@ elif tab == "📈 SHAP":
 
 # 📥 Вкладка: Upload CSV
 elif tab == "📥 Upload CSV":
-    st.header("📥 Прогноз по загруженному CSV")
-    st.info("Раздел в разработке...")
+    st.header("📥 Загрузка пользовательского CSV и прогноз")
+
+    uploaded_file = st.file_uploader("Загрузите CSV-файл с историческими данными (Date, Open, High, Low, Close, Volume):", type="csv")
+
+    if uploaded_file is not None:
+        user_df = pd.read_csv(uploaded_file)
+        st.write("📄 Загружен файл:")
+        st.dataframe(user_df.head())
+
+        required_cols = {"Date", "Open", "High", "Low", "Close", "Volume"}
+        if not required_cols.issubset(set(user_df.columns)):
+            st.error(f"❌ Файл должен содержать колонки: {required_cols}")
+        else:
+            st.success("✅ Данные загружены корректно. Генерируем признаки...")
+
+            user_df["Date"] = pd.to_datetime(user_df["Date"])
+            user_df.sort_values("Date", inplace=True)
+
+            try:
+                df_feat = generate_features(user_df)
+                st.success("✅ Признаки сгенерированы")
+
+                # Обучим модель на встроенном AAPL
+                base_df = load_ticker_data("AAPL")
+                base_feat = generate_features(base_df)
+                model, _, _, _ = train_classifier(base_feat)
+
+                # Прогноз на пользовательском наборе
+                feature_cols = [
+                    "return_1d", "return_5d", "return_20d",
+                    "SMA_5", "SMA_20", "SMA_50",
+                    "volatility_5d", "volatility_20d",
+                    "lag_1", "lag_5", "lag_20"
+                ]
+                X_user = df_feat[feature_cols]
+                df_feat["predicted_proba"] = model.predict_proba(X_user)[:, 1]
+                df_feat["signal"] = (df_feat["predicted_proba"] > 0.5).astype(int)
+
+                st.subheader("📊 Прогнозы")
+                st.dataframe(df_feat[["Date", "Close", "predicted_proba", "signal"]].tail(10))
+
+                st.subheader("📈 График с сигналами")
+                fig, ax = plt.subplots(figsize=(10, 4))
+                ax.plot(df_feat["Date"], df_feat["Close"], label="Close")
+                ax.scatter(df_feat[df_feat["signal"] == 1]["Date"], df_feat[df_feat["signal"] == 1]["Close"],
+                           label="Buy Signal", marker="^", color="green")
+                ax.set_title("Прогнозируемые сигналы")
+                ax.legend()
+                ax.grid(True)
+                st.pyplot(fig)
+
+                st.download_button("⬇️ Скачать результаты (CSV)",
+                                   df_feat.to_csv(index=False),
+                                   file_name="thothmind_predictions.csv")
+            except Exception as e:
+                st.error(f"Ошибка при обработке данных: {e}")
+    else:
+        st.info("Загрузите CSV для получения прогноза.")
 
 # 📤 Вкладка: Export
 elif tab == "📤 Export":
