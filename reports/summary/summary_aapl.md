@@ -6,4 +6,4 @@
 **Trades Made:** 720
 **Strategy Return:** 2221.94%
 
-![Strategy Plot](../plots/aapl_strategy.png)
+![Strategy Plot](../plots/AAPL_strategy.png)
