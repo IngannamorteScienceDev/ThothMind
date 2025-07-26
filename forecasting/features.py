@@ -1,11 +1,8 @@
 import pandas as pd
 
-def generate_features(df: pd.DataFrame, target_horizon: int = 5) -> pd.DataFrame:
-    """
-    Генерирует признаки и целевую переменную для прогнозирования цен
-    """
+def generate_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df.set_index("Date", inplace=True)
+    df = df.sort_values("Date")
 
     # Доходности
     df["return_1d"] = df["Close"].pct_change(1)
@@ -26,10 +23,13 @@ def generate_features(df: pd.DataFrame, target_horizon: int = 5) -> pd.DataFrame
     df["lag_5"] = df["Close"].shift(5)
     df["lag_20"] = df["Close"].shift(20)
 
-    # Целевая переменная — доходность через N дней
-    df[f"target_return_{target_horizon}d"] = df["Close"].shift(-target_horizon) / df["Close"] - 1
+    # Целевая переменная: доходность через 5 дней
+    df["target_return_5d"] = df["Close"].shift(-5) / df["Close"] - 1
 
-    # Удаляем строки с пропущенными значениями
-    df.dropna(inplace=True)
+    # Бинарная цель: вырастет ли цена
+    df["target_up_5d"] = (df["target_return_5d"] > 0).astype(int)
 
-    return df.reset_index()
+    # Удалим строки с пропущенными значениями
+    df = df.dropna().reset_index(drop=True)
+
+    return df
