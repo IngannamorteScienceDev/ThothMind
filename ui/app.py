@@ -70,10 +70,49 @@ if tab == "📊 EDA":
     plot_price_and_indicators(df_feat, ticker)
     st.dataframe(df_feat.tail(10))
 
+from forecasting.xgb_classifier import train_classifier
+from forecasting.threshold_optimizer import find_best_threshold
+from simulate.smart_simulator import simulate_with_filters
+from sklearn.metrics import classification_report, roc_auc_score
+
 # 🧠 Вкладка: Model
 elif tab == "🧠 Model":
-    st.header("🧠 Model Training & Forecasting")
-    st.info("Раздел в разработке...")
+    st.header("🧠 Model Training & Strategy Simulation")
+
+    if st.button("🚀 Запустить модель"):
+        df = load_ticker_data(ticker)
+        df_feat = generate_features(df)
+
+        model, X_test, y_test, y_proba = train_classifier(df_feat)
+        roc_auc = round(roc_auc_score(y_test, y_proba), 4)
+
+        best_t, best_f1 = find_best_threshold(y_test, y_proba)
+        preds = (y_proba > best_t).astype(int)
+
+        sim_df = simulate_with_filters(df_feat, y_proba, threshold=best_t)
+        strategy_return = sim_df["capital"].iloc[-1] - 1
+        trades = int(sim_df["final_signal"].sum())
+
+        st.success("✅ Модель обучена и стратегия рассчитана")
+        st.markdown(f"""
+        - **ROC AUC:** `{roc_auc}`
+        - **Best threshold:** `{best_t:.3f}` (F1 = `{best_f1:.3f}`)
+        - **Trades made:** `{trades}`
+        - **Return:** `{strategy_return:.2%}`
+        """)
+
+        st.subheader("📈 Strategy vs Buy & Hold")
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(sim_df["capital"], label="Strategy")
+        ax.plot(sim_df["buy_and_hold"], label="Buy & Hold", linestyle="--")
+        ax.legend()
+        ax.grid(True)
+        st.pyplot(fig)
+
+        st.subheader("📄 Последние сигналы модели")
+        st.dataframe(sim_df.tail(10))
+    else:
+        st.info("Нажмите кнопку выше, чтобы обучить модель и запустить стратегию.")
 
 # 🧪 Вкладка: Tuning
 elif tab == "🧪 Tuning":
