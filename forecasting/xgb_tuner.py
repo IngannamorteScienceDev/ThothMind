@@ -1,43 +1,43 @@
 import pandas as pd
-import xgboost as xgb
-from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
+from sklearn.model_selection import GridSearchCV
+from xgboost import XGBRegressor
 from sklearn.metrics import make_scorer, mean_squared_error
+import numpy as np
 
-def tune_xgb(df: pd.DataFrame, target_column: str = "target_return_5d"):
-    """
-    Подбор гиперпараметров XGBoost через GridSearchCV с TimeSeriesSplit
-    """
-    df = df.copy()
-    X = df.drop(columns=["Date", "ticker", target_column])
-    y = df[target_column]
-
-    # Разделение по времени
-    tscv = TimeSeriesSplit(n_splits=3)
-
-    model = xgb.XGBRegressor(objective="reg:squarederror", random_state=42)
+def tune_xgb_model(df_feat: pd.DataFrame,
+                   learning_rates, max_depths, estimators, subsamples):
+    df_feat = df_feat.copy()
+    feature_cols = [
+        "return_1d", "return_5d", "return_20d",
+        "SMA_5", "SMA_20", "SMA_50",
+        "volatility_5d", "volatility_20d",
+        "lag_1", "lag_5", "lag_20"
+    ]
+    X = df_feat[feature_cols]
+    y = df_feat["target_return_5d"]
 
     param_grid = {
-        "n_estimators": [50, 100],
-        "max_depth": [3, 5, 7],
-        "learning_rate": [0.01, 0.1, 0.2],
-        "subsample": [0.8, 1.0],
+        "learning_rate": learning_rates,
+        "max_depth": max_depths,
+        "n_estimators": estimators,
+        "subsample": subsamples
     }
 
+    model = XGBRegressor(random_state=42, verbosity=0)
     scorer = make_scorer(mean_squared_error, greater_is_better=False)
-
-    grid = GridSearchCV(
-        model,
-        param_grid,
-        cv=tscv,
-        scoring=scorer,
-        n_jobs=-1,
-        verbose=1,
-    )
-
+    grid = GridSearchCV(model, param_grid, cv=3, scoring=scorer, n_jobs=-1)
     grid.fit(X, y)
 
-    best_model = grid.best_estimator_
     best_params = grid.best_params_
-    best_score = grid.best_score_
+    best_score = np.sqrt(-grid.best_score_)
 
-    return best_model, best_params, -best_score  # RMSE положительный
+    # Вся история
+    results_df = pd.DataFrame(grid.cv_results_)
+    results_df["rmse"] = np.sqrt(-results_df["mean_test_score"])
+    results_df = results_df[[
+        "param_learning_rate", "param_max_depth", "param_n_estimators",
+        "param_subsample", "rmse"
+    ]]
+    results_df.columns = ["learning_rate", "max_depth", "n_estimators", "subsample", "rmse"]
+
+    return best_params, best_score, results_df

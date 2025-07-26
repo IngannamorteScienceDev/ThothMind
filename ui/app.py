@@ -3,12 +3,18 @@ import sys
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 # Добавим корень проекта
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from data.smart_loader import load_ticker_data
 from forecasting.features import generate_features
+from forecasting.xgb_classifier import train_classifier
+from forecasting.threshold_optimizer import find_best_threshold
+from simulate.smart_simulator import simulate_with_filters
+from sklearn.metrics import classification_report, roc_auc_score
+from forecasting.xgb_tuner import tune_xgb_model
 
 # 📊 EDA-индикаторы
 def plot_price_and_indicators(df: pd.DataFrame, ticker: str):
@@ -70,11 +76,6 @@ if tab == "📊 EDA":
     plot_price_and_indicators(df_feat, ticker)
     st.dataframe(df_feat.tail(10))
 
-from forecasting.xgb_classifier import train_classifier
-from forecasting.threshold_optimizer import find_best_threshold
-from simulate.smart_simulator import simulate_with_filters
-from sklearn.metrics import classification_report, roc_auc_score
-
 # 🧠 Вкладка: Model
 elif tab == "🧠 Model":
     st.header("🧠 Model Training & Strategy Simulation")
@@ -117,7 +118,42 @@ elif tab == "🧠 Model":
 # 🧪 Вкладка: Tuning
 elif tab == "🧪 Tuning":
     st.header("🧪 Model Tuning")
-    st.info("Раздел в разработке...")
+
+    st.markdown("**Подбор гиперпараметров XGBoost с использованием GridSearchCV**")
+
+    df = load_ticker_data(ticker)
+    df_feat = generate_features(df)
+
+    # Пользовательский выбор параметров
+    st.sidebar.markdown("🎚 **Диапазоны параметров**")
+    learning_rates = st.sidebar.multiselect("learning_rate", [0.001, 0.01, 0.05, 0.1], default=[0.01, 0.1])
+    max_depths = st.sidebar.multiselect("max_depth", [2, 3, 4, 5, 6], default=[3, 5])
+    estimators = st.sidebar.multiselect("n_estimators", [20, 50, 100, 150], default=[50, 100])
+    subsamples = st.sidebar.multiselect("subsample", [0.5, 0.7, 0.8, 1.0], default=[0.8, 1.0])
+
+    if st.button("🔍 Запустить подбор"):
+        st.info("Подбираем параметры...")
+
+        best_params, best_score, results_df = tune_xgb_model(
+            df_feat,
+            learning_rates,
+            max_depths,
+            estimators,
+            subsamples
+        )
+
+        st.success("✅ Лучшие параметры найдены")
+        st.write(f"**Best RMSE:** {best_score:.5f}")
+        st.json(best_params)
+
+        st.subheader("📉 RMSE по параметрам")
+        fig, ax = plt.subplots(figsize=(8, 4))
+        sns.lineplot(data=results_df, x="n_estimators", y="rmse", hue="learning_rate", style="max_depth", ax=ax)
+        ax.grid(True)
+        st.pyplot(fig)
+
+        st.subheader("📋 Полные результаты (top 10)")
+        st.dataframe(results_df.sort_values("rmse").head(10))
 
 # 📈 Вкладка: SHAP
 elif tab == "📈 SHAP":
