@@ -9,7 +9,7 @@ def save_model(model, ticker: str):
     joblib.dump(model, path)
 
 def save_predictions(df: pd.DataFrame, ticker: str):
-    path = f"reports/{ticker.upper()}_predictions.csv"
+    path = f"reports/csv/{ticker.upper()}_predictions.csv"
     os.makedirs(os.path.dirname(path), exist_ok=True)
     df.to_csv(path, index=False)
 
@@ -29,7 +29,7 @@ def save_strategy_plot(df: pd.DataFrame, ticker: str):
     plt.close()
 
 def save_summary_report(ticker: str, metrics: dict):
-    path = f"reports/summary_{ticker.upper()}.md"
+    path = f"reports/summary/summary_{ticker.upper()}.md"
     os.makedirs(os.path.dirname(path), exist_ok=True)
     plot_path = f"plots/{ticker.upper()}_strategy.png"
 
@@ -40,4 +40,4 @@ def save_summary_report(ticker: str, metrics: dict):
         f.write(f"**Best Threshold:** {metrics['threshold']:.4f} (F1: {metrics['f1']:.4f})\n")
         f.write(f"**Trades Made:** {metrics['trades']}\n")
         f.write(f"**Strategy Return:** {metrics['strategy_return']:.2%}\n\n")
-        f.write(f"![Strategy Plot]({plot_path})\n")
+        f.write(f"![Strategy Plot](../plots/{ticker.upper()}_strategy.png)\n")
