@@ -71,9 +71,10 @@ if tab == "📊 EDA":
     plot_price_and_indicators(df_feat, ticker)
     st.dataframe(df_feat.tail(10))
 
-# 🧠 Вкладка: Model
 elif tab == "🧠 Model":
     st.header("🧠 Model Training & Strategy Simulation")
+
+    use_filters = st.checkbox("🧪 Применять технические фильтры (RSI / SMA)", value=True)
 
     if st.button("🚀 Запустить модель"):
         df = load_ticker_data(ticker)
@@ -85,7 +86,7 @@ elif tab == "🧠 Model":
         best_t, best_f1 = find_best_threshold(y_test, y_proba)
         preds = (y_proba > best_t).astype(int)
 
-        sim_df = simulate_with_filters(df_feat, y_proba, threshold=best_t)
+        sim_df = simulate_with_filters(df_feat, y_proba, threshold=best_t, use_filters=use_filters)
         strategy_return = sim_df["capital"].iloc[-1] - 1
         trades = int(sim_df["final_signal"].sum())
 
@@ -108,14 +109,13 @@ elif tab == "🧠 Model":
         st.subheader("📄 Последние сигналы модели")
         st.dataframe(sim_df.tail(10))
 
-        # 📤 Экспорт артефактов
+        # Экспорт
         from reports.exporter import (
             save_model,
             save_predictions,
             save_strategy_plot,
             save_summary_report
         )
-
         save_model(model, ticker)
         save_predictions(sim_df, ticker)
         save_strategy_plot(sim_df, ticker)
@@ -248,11 +248,12 @@ elif tab == "📥 Upload CSV":
 
 elif tab == "📤 Export":
     st.header("📤 Отчёты и загрузки")
+
     file_prefix = ticker.upper()
     paths = {
-        "📄 Markdown Report": f"reports/summary_{file_prefix}.md",
+        "📄 Markdown Report": f"reports/summary/summary_{file_prefix}.md",
         "📈 Strategy Plot (PNG)": f"reports/plots/{file_prefix}_strategy.png",
-        "📦 Predictions CSV": f"reports/{file_prefix}_predictions.csv",
+        "📦 Predictions CSV": f"reports/csv/{file_prefix}_predictions.csv",
         "🧠 Model File": f"models/xgb_{file_prefix}.joblib"
     }
 
@@ -266,4 +267,5 @@ elif tab == "📤 Export":
         else:
             st.warning(f"{label} не найден: {path}")
 
-    st.info("🧭 Файлы сохраняются в папку `reports/` и `models/`. Открой вручную, если не загружаются.")
+    st.info("🧭 Файлы сохраняются в папки `reports/summary/`, `reports/csv/`, `reports/plots/` и `models/`. "
+            "Открой вручную, если не загружаются.")

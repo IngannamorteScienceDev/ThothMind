@@ -2,16 +2,18 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-def simulate_with_filters(df: pd.DataFrame, y_proba: np.ndarray, threshold: float):
+def simulate_with_filters(df: pd.DataFrame, y_proba: np.ndarray, threshold: float, use_filters: bool = True):
     df = df.copy()
-    df = df.iloc[-len(y_proba):]  # test period
+    df = df.iloc[-len(y_proba):]  # тестовый период
     df["proba"] = y_proba
     df["signal"] = (df["proba"] > threshold).astype(int)
 
-    # Фильтр по RSI и SMA
-    df["filter"] = (df["SMA_20"] > df["SMA_50"]) & (df["SMA_5"] > df["SMA_20"])
-    df["final_signal"] = df["signal"] & df["filter"]
+    if use_filters:
+        df["filter"] = (df["SMA_20"] > df["SMA_50"]) & (df["SMA_5"] > df["SMA_20"])
+    else:
+        df["filter"] = True  # нет фильтра — пропускаем всё
 
+    df["final_signal"] = df["signal"] & df["filter"]
     df["return"] = df["target_return_5d"]
     df["strategy_return"] = df["final_signal"] * df["return"]
 
