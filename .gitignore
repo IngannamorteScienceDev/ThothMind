@@ -71,6 +71,3 @@ pip-delete-this-directory.txt
 # Exported environments
 *.yml
 *.yaml
-/reports/csv
-/reports/plots
-/reports/summary
