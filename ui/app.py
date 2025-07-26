@@ -7,6 +7,7 @@ import seaborn as sns
 import shap
 import numpy as np
 import matplotlib.pyplot as plt
+import base64
 
 # Добавим корень проекта
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -250,4 +251,22 @@ elif tab == "📥 Upload CSV":
 # 📤 Вкладка: Export
 elif tab == "📤 Export":
     st.header("📤 Отчёты и загрузки")
-    st.info("Раздел в разработке...")
+
+    file_prefix = ticker.upper()
+
+    paths = {
+        "📄 Markdown Report": f"reports/summary_{file_prefix}.md",
+        "📈 Strategy Plot (PNG)": f"reports/plots/{file_prefix}_strategy.png",
+        "📦 Predictions CSV": f"reports/{file_prefix}_predictions.csv",
+        "🧠 Model File": f"models/xgb_{file_prefix}.joblib"
+    }
+
+    for label, path in paths.items():
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                content = f.read()
+                b64 = base64.b64encode(content).decode()
+                href = f'<a href="data:file/octet-stream;base64,{b64}" download="{os.path.basename(path)}">{label}</a>'
+                st.markdown(href, unsafe_allow_html=True)
+        else:
+            st.warning(f"{label} не найден: {path}")
