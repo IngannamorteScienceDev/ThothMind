@@ -37,16 +37,15 @@ def main():
         )
 
     df = pd.read_csv(ALLOCATION_RESULTS_PATH)
-
     results = []
 
     for alloc in sorted(df["allocation"].unique()):
-        alloc_df = df[df["allocation"] == alloc]
+        sub = df[df["allocation"] == alloc]
 
-        strategy_returns = alloc_df["total_return"].values
-        bh_returns = alloc_df["benchmark_bh_return"].values
+        strategy = sub["total_return"].values
+        bh = sub["benchmark_bh_return"].values
 
-        diffs = bootstrap_mean_diff(strategy_returns, bh_returns, BOOTSTRAP_SAMPLES)
+        diffs = bootstrap_mean_diff(strategy, bh, BOOTSTRAP_SAMPLES)
 
         results.append({
             "allocation": alloc,
@@ -65,7 +64,7 @@ def main():
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     result_df.to_csv(OUTPUT_PATH, index=False)
 
-    print("\n✅ Bootstrap significance saved to:")
+    print("\n✅ Saved:")
     print(f"   {OUTPUT_PATH}")
 
 
