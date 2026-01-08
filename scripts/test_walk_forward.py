@@ -8,7 +8,7 @@ sys.path.append(
 
 from data.smart_loader import load_ticker_data
 from forecasting.features import generate_features
-from forecasting.xgb_regressor import train_regressor
+from forecasting.xgb_research import train_xgb_on_window, predict_on_window
 from simulate.smart_simulator import simulate_with_filters
 from forecasting.metrics import evaluate_strategy
 
@@ -25,7 +25,6 @@ TEST_WINDOW = TEST_YEARS * TRADING_DAYS
 
 print(f"\n🚶 Walk-forward backtest for {TICKER}")
 
-# Load & prepare data
 df = load_ticker_data(TICKER)
 df_feat = generate_features(df)
 
@@ -48,16 +47,14 @@ while start + TRAIN_WINDOW + TEST_WINDOW <= len(df_feat):
         f"→ {test_df['Date'].iloc[-1].date()}"
     )
 
-    # Train model on rolling window
-    model, _, _, y_pred = train_regressor(
-        pd.concat([train_df, test_df], axis=0),
-        train_only_len=len(train_df)
-    )
+    # 🔬 Research-grade training
+    model = train_xgb_on_window(train_df)
+    y_pred = predict_on_window(model, test_df)
 
-    # Simulate only on test window
+    # 🎯 Strategy simulation on test window only
     sim_df = simulate_with_filters(
         test_df,
-        y_pred[-len(test_df):],
+        y_pred,
         entry_threshold=0.01,
         exit_threshold=0.0,
         max_holding=5,
@@ -70,10 +67,9 @@ while start + TRAIN_WINDOW + TEST_WINDOW <= len(df_feat):
     metrics["test_start"] = test_df["Date"].iloc[0]
 
     results.append(metrics)
-
     start += step
 
-# Collect results
+
 results_df = pd.DataFrame(results)
 
 print("\n📊 WALK-FORWARD RESULTS")
