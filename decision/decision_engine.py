@@ -4,15 +4,17 @@ from typing import Optional
 
 @dataclass
 class DecisionResult:
-    decision: str          # ENABLE / HOLD / DISABLE
-    confidence: str        # HIGH / MEDIUM / LOW
+    decision: str        # ENABLE / HOLD / DISABLE
+    confidence: str      # HIGH / MEDIUM / LOW
     rationale: str
 
 
 class DecisionEngine:
     """
-    Decision layer for investment approval.
-    Translates metrics into an actionable decision.
+    Final investment decision layer combining:
+    - risk metrics
+    - market regime
+    - statistical significance (bootstrap)
     """
 
     def __init__(
@@ -31,33 +33,36 @@ class DecisionEngine:
         sharpe: float,
         max_drawdown: float,
         market_regime: str,
-        bootstrap_p_value: Optional[float] = None
+        bootstrap_p_value: Optional[float]
     ) -> DecisionResult:
 
         reasons = []
 
-        # 1. Risk constraints
+        # Risk checks
         if sharpe < self.min_sharpe:
             reasons.append("Sharpe below minimum threshold")
 
         if max_drawdown < self.max_drawdown_limit:
-            reasons.append("Max drawdown exceeds risk limit")
+            reasons.append("Excessive drawdown")
 
-        # 2. Regime-based caution
-        if "Bear" in market_regime and "HighVol" in market_regime:
-            reasons.append("Unfavorable market regime (Bear-HighVol)")
+        # Regime awareness
+        if "Bear-HighVol" in market_regime:
+            reasons.append("Unfavorable market regime")
 
-        # 3. Statistical significance (optional)
-        if bootstrap_p_value is not None:
-            if bootstrap_p_value > self.significance_level:
-                reasons.append("No statistically significant outperformance")
+        # Statistical significance
+        if bootstrap_p_value is None:
+            reasons.append("No statistical significance test")
+        elif bootstrap_p_value > self.significance_level:
+            reasons.append(
+                f"No significant outperformance (p={bootstrap_p_value:.3f})"
+            )
 
-        # ---- Final decision logic ----
+        # Decision logic
         if len(reasons) == 0:
             return DecisionResult(
                 decision="ENABLE",
                 confidence="HIGH",
-                rationale="All risk, regime, and performance criteria satisfied"
+                rationale="Strategy passes risk, regime and significance criteria"
             )
 
         if len(reasons) <= 2:
