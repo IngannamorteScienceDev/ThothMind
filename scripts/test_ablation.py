@@ -3,6 +3,7 @@ import sys
 import pandas as pd
 import numpy as np
 
+# Добавляем корень проекта в PYTHONPATH
 sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 )
@@ -16,46 +17,78 @@ from forecasting.metrics import evaluate_strategy
 
 TICKER = "AAPL"
 
-experiments = [
-    {"name": "Buy&Hold", "use_ml": False, "use_filters": False},
-    {"name": "Random", "use_ml": False, "use_filters": False, "random": True},
-    {"name": "ML_only", "use_ml": True, "use_filters": False},
-    {"name": "ML+Filters", "use_ml": True, "use_filters": True},
+EXPERIMENTS = [
+    {"name": "Buy&Hold", "mode": "buy_and_hold"},
+    {"name": "Random", "mode": "random"},
+    {"name": "ML_only", "mode": "ml", "use_filters": False},
+    {"name": "ML+Filters", "mode": "ml", "use_filters": True},
 ]
 
 results = []
 
-# Load data once
+print(f"\n📊 Running ablation study for {TICKER}")
+
+# 1. Load and prepare data
 df = load_ticker_data(TICKER)
 df_feat = generate_features(df)
 
-# Train ML model once
+# 2. Train ML model once
 model, X_test, y_test, y_pred = train_regressor(df_feat)
 
-for exp in experiments:
-    print(f"\n🧪 Running experiment: {exp['name']}")
+for exp in EXPERIMENTS:
+    print(f"\n🧪 Experiment: {exp['name']}")
 
-    if exp.get("random", False):
-        y_signal = np.random.normal(0, 0.01, size=len(y_pred))
-    elif exp["use_ml"]:
-        y_signal = y_pred
+    # =========================
+    # BUY & HOLD (canonical)
+    # =========================
+    if exp["mode"] == "buy_and_hold":
+        sim_df = simulate_with_filters(
+            df_feat,
+            y_pred,
+            force_buy_and_hold=True
+        )
+
+    # =========================
+    # RANDOM BASELINE
+    # =========================
+    elif exp["mode"] == "random":
+        rng = np.random.default_rng(seed=42)
+        random_signal = rng.normal(0, 0.01, size=len(y_pred))
+
+        sim_df = simulate_with_filters(
+            df_feat,
+            random_signal,
+            entry_threshold=0.01,
+            exit_threshold=0.0,
+            max_holding=5,
+            commission=0.001,
+            use_filters=False
+        )
+
+    # =========================
+    # ML-BASED STRATEGIES
+    # =========================
+    elif exp["mode"] == "ml":
+        sim_df = simulate_with_filters(
+            df_feat,
+            y_pred,
+            entry_threshold=0.01,
+            exit_threshold=0.0,
+            max_holding=5,
+            commission=0.001,
+            use_filters=exp.get("use_filters", False)
+        )
+
     else:
-        y_signal = np.zeros(len(y_pred))  # no trades
+        raise ValueError(f"Unknown experiment mode: {exp['mode']}")
 
-    sim_df = simulate_with_filters(
-        df_feat,
-        y_signal,
-        entry_threshold=0.01,
-        exit_threshold=0.0,
-        max_holding=5,
-        commission=0.001,
-        use_filters=exp.get("use_filters", False)
-    )
-
+    # 3. Evaluate strategy
     metrics = evaluate_strategy(sim_df)
     metrics["experiment"] = exp["name"]
+
     results.append(metrics)
 
+# 4. Collect results
 results_df = pd.DataFrame(results)
 results_df = results_df[
     ["experiment", "total_return", "sharpe", "max_drawdown"]
@@ -64,7 +97,9 @@ results_df = results_df[
 print("\n📊 ABLATION STUDY RESULTS")
 print(results_df)
 
+# 5. Save results
 os.makedirs("reports/csv", exist_ok=True)
-results_df.to_csv("reports/csv/ablation_results_AAPL.csv", index=False)
+out_path = f"reports/csv/ablation_results_{TICKER}.csv"
+results_df.to_csv(out_path, index=False)
 
-print("\n✅ Saved to reports/csv/ablation_results_AAPL.csv")
+print(f"\n✅ Saved to {out_path}")
