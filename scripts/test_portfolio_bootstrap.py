@@ -4,13 +4,11 @@ import numpy as np
 import pandas as pd
 
 # ===============================
-# 🔧 PROJECT ROOT PATCH
+# PROJECT ROOT PATCH
 # ===============================
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
-
-from data.metrics.performance import compute_performance_metrics
 
 # ===============================
 # CONFIG
@@ -29,7 +27,7 @@ def bootstrap_mean_diff(a, b, n=10000):
 
 
 def main():
-    print("\n🧪 Portfolio bootstrap significance vs Buy & Hold")
+    print("\n🧪 Portfolio bootstrap significance (window-level)")
 
     if not os.path.exists(ALLOCATION_RESULTS_PATH):
         raise FileNotFoundError(
@@ -37,26 +35,32 @@ def main():
         )
 
     df = pd.read_csv(ALLOCATION_RESULTS_PATH)
+
     results = []
 
     for alloc in sorted(df["allocation"].unique()):
         sub = df[df["allocation"] == alloc]
 
+        # 🔑 WINDOW-LEVEL RETURNS
         strategy = sub["total_return"].values
-        bh = sub["benchmark_bh_return"].values
+        benchmark = sub["benchmark_bh_return"].values
 
-        diffs = bootstrap_mean_diff(strategy, bh, BOOTSTRAP_SAMPLES)
+        # sanity check
+        if len(strategy) < 5:
+            continue
+
+        diffs = bootstrap_mean_diff(strategy, benchmark, BOOTSTRAP_SAMPLES)
 
         results.append({
             "allocation": alloc,
-            "mean_diff": diffs.mean(),
+            "mean_excess_return": diffs.mean(),
             "ci_lower": np.percentile(diffs, 2.5),
             "ci_upper": np.percentile(diffs, 97.5),
             "p_value": np.mean(diffs <= 0)
         })
 
         print(f"\n📌 Allocation = {alloc}")
-        print(f"Mean Δ: {diffs.mean():.4f}")
+        print(f"Mean excess return: {diffs.mean():.4f}")
         print(f"95% CI: [{np.percentile(diffs,2.5):.4f}, {np.percentile(diffs,97.5):.4f}]")
         print(f"P-value: {np.mean(diffs <= 0):.4f}")
 

@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from metrics.performance import compute_performance_metrics
+from data.metrics.performance import compute_performance_metrics
 
 
 def compute_inverse_vol_weights(

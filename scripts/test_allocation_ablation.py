@@ -5,7 +5,7 @@ from forecasting.features import generate_features
 from forecasting.xgb_regressor import train_regressor
 
 from simulate.smart_simulator import simulate_with_allocation
-from metrics.performance import compute_performance_metrics
+from data.metrics.performance import compute_performance_metrics
 from stats.regime import detect_market_regime
 from stats.bootstrap import paired_bootstrap_test
 
