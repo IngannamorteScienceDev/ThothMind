@@ -1,35 +1,34 @@
 import pandas as pd
+import numpy as np
 
 def generate_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df = df.sort_values("Date")
 
-    # Доходности
+    # === Доходности ===
     df["return_1d"] = df["Close"].pct_change(1)
     df["return_5d"] = df["Close"].pct_change(5)
     df["return_20d"] = df["Close"].pct_change(20)
 
-    # Скользящие средние
-    df["SMA_5"] = df["Close"].rolling(window=5).mean()
-    df["SMA_20"] = df["Close"].rolling(window=20).mean()
-    df["SMA_50"] = df["Close"].rolling(window=50).mean()
+    # === Скользящие средние (нормированные) ===
+    df["SMA_5"] = df["Close"].rolling(5).mean() / df["Close"]
+    df["SMA_20"] = df["Close"].rolling(20).mean() / df["Close"]
+    df["SMA_50"] = df["Close"].rolling(50).mean() / df["Close"]
 
-    # Волатильность
-    df["volatility_5d"] = df["Close"].rolling(window=5).std()
-    df["volatility_20d"] = df["Close"].rolling(window=20).std()
+    # === Волатильность (в доходностях) ===
+    df["volatility_5d"] = df["return_1d"].rolling(5).std()
+    df["volatility_20d"] = df["return_1d"].rolling(20).std()
 
-    # Лаги
-    df["lag_1"] = df["Close"].shift(1)
-    df["lag_5"] = df["Close"].shift(5)
-    df["lag_20"] = df["Close"].shift(20)
+    # === Лаги доходностей (ВАЖНО) ===
+    df["lag_1"] = df["return_1d"].shift(1)
+    df["lag_5"] = df["return_1d"].shift(5)
+    df["lag_20"] = df["return_1d"].shift(20)
 
-    # Целевая переменная: доходность через 5 дней
+    # === ЦЕЛЕВАЯ ПЕРЕМЕННАЯ (РЕГРЕССИЯ) ===
     df["target_return_5d"] = df["Close"].shift(-5) / df["Close"] - 1
 
-    # Бинарная цель: вырастет ли цена
-    df["target_up_5d"] = (df["target_return_5d"] > 0).astype(int)
-
-    # Удалим строки с пропущенными значениями
+    # === Очистка ===
+    df = df.replace([np.inf, -np.inf], np.nan)
     df = df.dropna().reset_index(drop=True)
 
     return df

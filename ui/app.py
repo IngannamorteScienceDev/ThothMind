@@ -7,15 +7,14 @@ import seaborn as sns
 import shap
 import numpy as np
 import base64
-from sklearn.metrics import roc_auc_score, classification_report, roc_curve, auc
+from sklearn.metrics import mean_squared_error, r2_score
 
 # Добавим корень проекта
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from data.smart_loader import load_ticker_data
 from forecasting.features import generate_features
-from forecasting.xgb_classifier import train_classifier
-from forecasting.threshold_optimizer import find_best_threshold
+from forecasting.xgb_regressor import train_regressor
 from forecasting.xgb_tuner import tune_xgb_model
 from simulate.smart_simulator import simulate_with_filters
 
@@ -49,9 +48,11 @@ def plot_price_and_indicators(df: pd.DataFrame, ticker: str):
     ax2.grid(True)
     st.pyplot(fig2)
 
+# 🧠 Настройки
 st.set_page_config(page_title="ThothMind Dashboard", layout="wide")
 st.title("🧠 ThothMind — Market Intelligence Platform")
 
+# Вкладки
 tab = st.sidebar.selectbox("Выберите модуль:", [
     "📊 EDA",
     "🧠 Model",
@@ -61,8 +62,10 @@ tab = st.sidebar.selectbox("Выберите модуль:", [
     "📤 Export"
 ])
 
+# Тикер
 ticker = st.sidebar.text_input("Ticker:", "AAPL").upper()
 
+# 📊 EDA
 if tab == "📊 EDA":
     st.header("📊 Exploratory Data Analysis")
     df = load_ticker_data(ticker)
@@ -71,6 +74,7 @@ if tab == "📊 EDA":
     plot_price_and_indicators(df_feat, ticker)
     st.dataframe(df_feat.tail(10))
 
+# 🧠 Model
 elif tab == "🧠 Model":
     st.header("🧠 Model Training & Strategy Simulation")
 
@@ -80,20 +84,19 @@ elif tab == "🧠 Model":
         df = load_ticker_data(ticker)
         df_feat = generate_features(df)
 
-        model, X_test, y_test, y_proba = train_classifier(df_feat)
-        roc_auc = round(roc_auc_score(y_test, y_proba), 4)
+        model, X_test, y_test, y_pred = train_regressor(df_feat)
+        mse = mean_squared_error(y_test, y_pred)
+        rmse = np.sqrt(mse)
+        r2 = r2_score(y_test, y_pred)
 
-        best_t, best_f1 = find_best_threshold(y_test, y_proba)
-        preds = (y_proba > best_t).astype(int)
-
-        sim_df = simulate_with_filters(df_feat, y_proba, threshold=best_t, use_filters=use_filters)
+        sim_df = simulate_with_filters(df_feat, y_pred, threshold=0, use_filters=use_filters)
         strategy_return = sim_df["capital"].iloc[-1] - 1
         trades = int(sim_df["final_signal"].sum())
 
         st.success("✅ Модель обучена и стратегия рассчитана")
         st.markdown(f"""
-        - **ROC AUC:** `{roc_auc}`
-        - **Best threshold:** `{best_t:.3f}` (F1 = `{best_f1:.3f}`)
+        - **R²:** `{r2:.4f}`
+        - **RMSE:** `{rmse:.6f}`
         - **Trades made:** `{trades}`
         - **Return:** `{strategy_return:.2%}`
         """)
@@ -109,7 +112,7 @@ elif tab == "🧠 Model":
         st.subheader("📄 Последние сигналы модели")
         st.dataframe(sim_df.tail(10))
 
-        # Экспорт
+        # Сохраняем
         from reports.exporter import (
             save_model,
             save_predictions,
@@ -122,150 +125,11 @@ elif tab == "🧠 Model":
         save_summary_report(
             ticker,
             metrics={
-                "roc_auc": roc_auc,
-                "threshold": best_t,
-                "f1": best_f1,
+                "r2": r2,
+                "rmse": rmse,
                 "trades": trades,
                 "strategy_return": strategy_return
             }
         )
     else:
         st.info("Нажмите кнопку выше, чтобы обучить модель и запустить стратегию.")
-
-elif tab == "📈 SHAP":
-    st.header("📈 Explainable AI — SHAP Values")
-    df = load_ticker_data(ticker)
-    df_feat = generate_features(df)
-    model, X_test, y_test, y_proba = train_classifier(df_feat)
-    explainer = shap.Explainer(model)
-    shap_values = explainer(X_test)
-    st.success("✅ SHAP значения рассчитаны")
-
-    st.subheader("📊 Summary Bar Plot")
-    fig, _ = plt.subplots()
-    shap.plots.bar(shap_values, show=False)
-    st.pyplot(plt.gcf())
-    plt.clf()
-
-    st.subheader("📊 Summary Dot Plot")
-    fig2 = shap.plots.beeswarm(shap_values, show=False)
-    st.pyplot(plt.gcf())
-    plt.clf()
-
-    st.subheader("📋 Таблица важности")
-    importance_df = pd.DataFrame({
-        "Feature": X_test.columns,
-        "Mean |SHAP|": np.abs(shap_values.values).mean(axis=0)
-    }).sort_values("Mean |SHAP|", ascending=False)
-    st.dataframe(importance_df.head(10))
-
-elif tab == "🧪 Tuning":
-    st.header("🧪 Model Tuning")
-
-    st.markdown("**Подбор гиперпараметров XGBoost с использованием GridSearchCV**")
-
-    df = load_ticker_data(ticker)
-    df_feat = generate_features(df)
-
-    # Пользовательский выбор параметров
-    st.sidebar.markdown("🎚 **Диапазоны параметров**")
-    learning_rates = st.sidebar.multiselect("learning_rate", [0.001, 0.01, 0.05, 0.1], default=[0.01, 0.1])
-    max_depths = st.sidebar.multiselect("max_depth", [2, 3, 4, 5, 6], default=[3, 5])
-    estimators = st.sidebar.multiselect("n_estimators", [20, 50, 100, 150], default=[50, 100])
-    subsamples = st.sidebar.multiselect("subsample", [0.5, 0.7, 0.8, 1.0], default=[0.8, 1.0])
-
-    if st.button("🔍 Запустить подбор"):
-        st.info("Подбираем параметры...")
-
-        best_params, best_score, results_df = tune_xgb_model(
-            df_feat,
-            learning_rates,
-            max_depths,
-            estimators,
-            subsamples
-        )
-
-        st.success("✅ Лучшие параметры найдены")
-        st.write(f"**Best RMSE:** {best_score:.5f}")
-        st.json(best_params)
-
-        st.subheader("📉 RMSE по параметрам")
-        fig, ax = plt.subplots(figsize=(8, 4))
-        sns.lineplot(data=results_df, x="n_estimators", y="rmse", hue="learning_rate", style="max_depth", ax=ax)
-        ax.grid(True)
-        st.pyplot(fig)
-
-        st.subheader("📋 Полные результаты (top 10)")
-        st.dataframe(results_df.sort_values("rmse").head(10))
-
-elif tab == "📥 Upload CSV":
-    st.header("📥 Загрузка пользовательского CSV и прогноз")
-    uploaded_file = st.file_uploader("Загрузите CSV-файл с историческими данными (Date, Open, High, Low, Close, Volume):", type=["csv", "txt"])
-    if uploaded_file is not None:
-        user_df = pd.read_csv(uploaded_file)
-        st.write("📄 Загружен файл:")
-        st.dataframe(user_df.head())
-
-        required_cols = {"Date", "Open", "High", "Low", "Close", "Volume"}
-        if not required_cols.issubset(set(user_df.columns)):
-            st.error(f"❌ Файл должен содержать колонки: {required_cols}")
-        else:
-            st.success("✅ Данные загружены корректно. Генерируем признаки...")
-            user_df["Date"] = pd.to_datetime(user_df["Date"])
-            user_df.sort_values("Date", inplace=True)
-
-            try:
-                df_feat = generate_features(user_df)
-                st.success("✅ Признаки сгенерированы")
-
-                base_df = load_ticker_data("AAPL")
-                base_feat = generate_features(base_df)
-                model, _, _, _ = train_classifier(base_feat)
-
-                expected_cols = model.get_booster().feature_names
-                X_user = df_feat[expected_cols]
-                df_feat["predicted_proba"] = model.predict_proba(X_user)[:, 1]
-                df_feat["signal"] = (df_feat["predicted_proba"] > 0.5).astype(int)
-
-                st.subheader("📊 Прогнозы")
-                st.dataframe(df_feat[["Date", "Close", "predicted_proba", "signal"]].tail(10))
-
-                st.subheader("📈 График с сигналами")
-                fig, ax = plt.subplots(figsize=(10, 4))
-                ax.plot(df_feat["Date"], df_feat["Close"], label="Close")
-                ax.scatter(df_feat[df_feat["signal"] == 1]["Date"], df_feat[df_feat["signal"] == 1]["Close"],
-                           label="Buy Signal", marker="^", color="green")
-                ax.set_title("Прогнозируемые сигналы")
-                ax.legend()
-                ax.grid(True)
-                st.pyplot(fig)
-
-                st.download_button("⬇️ Скачать результаты (CSV)",
-                                   df_feat.to_csv(index=False),
-                                   file_name="thothmind_predictions.csv")
-            except Exception as e:
-                st.error(f"Ошибка при обработке данных: {e}")
-
-elif tab == "📤 Export":
-    st.header("📤 Отчёты и загрузки")
-
-    file_prefix = ticker.upper()
-    paths = {
-        "📄 Markdown Report": f"reports/summary/summary_{file_prefix}.md",
-        "📈 Strategy Plot (PNG)": f"reports/plots/{file_prefix}_strategy.png",
-        "📦 Predictions CSV": f"reports/csv/{file_prefix}_predictions.csv",
-        "🧠 Model File": f"models/xgb_{file_prefix}.joblib"
-    }
-
-    for label, path in paths.items():
-        if os.path.exists(path):
-            with open(path, "rb") as f:
-                content = f.read()
-                b64 = base64.b64encode(content).decode()
-                href = f'<a href="data:file/octet-stream;base64,{b64}" download="{os.path.basename(path)}">{label}</a>'
-                st.markdown(href, unsafe_allow_html=True)
-        else:
-            st.warning(f"{label} не найден: {path}")
-
-    st.info("🧭 Файлы сохраняются в папки `reports/summary/`, `reports/csv/`, `reports/plots/` и `models/`. "
-            "Открой вручную, если не загружаются.")

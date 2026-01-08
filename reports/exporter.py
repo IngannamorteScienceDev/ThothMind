@@ -31,13 +31,12 @@ def save_strategy_plot(df: pd.DataFrame, ticker: str):
 def save_summary_report(ticker: str, metrics: dict):
     path = f"reports/summary/summary_{ticker.upper()}.md"
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    plot_path = f"plots/{ticker.upper()}_strategy.png"
 
     with open(path, "w", encoding="utf-8") as f:
         f.write(f"# 📊 ThothMind Report — {ticker.upper()}\n\n")
-        f.write(f"**Model:** XGBoost Classifier\n")
-        f.write(f"**ROC AUC:** {metrics['roc_auc']:.4f}\n")
-        f.write(f"**Best Threshold:** {metrics['threshold']:.4f} (F1: {metrics['f1']:.4f})\n")
+        f.write(f"**Model:** XGBoost Regressor\n")
+        f.write(f"**R² Score:** {metrics['r2']:.4f}\n")
+        f.write(f"**RMSE:** {metrics['rmse']:.6f}\n")
         f.write(f"**Trades Made:** {metrics['trades']}\n")
         f.write(f"**Strategy Return:** {metrics['strategy_return']:.2%}\n\n")
         f.write(f"![Strategy Plot](../plots/{ticker.upper()}_strategy.png)\n")
