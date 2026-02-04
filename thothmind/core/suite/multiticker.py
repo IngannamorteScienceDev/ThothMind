@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import numpy as np
 
 
 def run_multiticker_suite(cfg: dict[str, Any], run_dir: Path) -> pd.DataFrame:
@@ -162,7 +163,34 @@ def run_multiticker_suite(cfg: dict[str, Any], run_dir: Path) -> pd.DataFrame:
 
         results.append(row)
 
-    summary_df = pd.DataFrame(results).sort_values(["status", "p_value_one_sided", "ticker"], ascending=[True, True, True])
+    summary_df = pd.DataFrame(results)
+
+    # Ensure required columns exist even if some/all tickers failed
+    for col in [
+        "ticker",
+        "status",
+        "actual_rel_return",
+        "p_value_one_sided",
+        "ci_rel_return_low",
+        "ci_rel_return_high",
+        "prob_outperform",
+    ]:
+        if col not in summary_df.columns:
+            summary_df[col] = np.nan
+
+    # Make status sortable: ok first, then error
+    try:
+        status_dtype = pd.CategoricalDtype(categories=["ok", "error"], ordered=True)
+        summary_df["status"] = summary_df["status"].astype(status_dtype)
+    except Exception:
+        pass
+
+    # Safe sort (NaNs last)
+    summary_df = summary_df.sort_values(
+        ["status", "p_value_one_sided", "ticker"],
+        ascending=[True, True, True],
+        na_position="last",
+    ).reset_index(drop=True)
 
     summary_df.to_csv(run_dir / "suite_summary.csv", index=False)
     save_json({"rows": summary_df.to_dict(orient="records")}, run_dir / "suite_summary.json")
