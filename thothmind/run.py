@@ -16,9 +16,9 @@ def run_experiment(config_path: str) -> str:
 
     stage = cfg.get("pipeline", {}).get("stage", "m0")
 
-    # Milestone 1/2/3/4/5 require df_feat
+    # Milestone 1/2/3/4/5/6 require df_feat
     df_feat = None
-    if stage in ("m1", "m2", "m3", "m4", "m5", "all"):
+    if stage in ("m1", "m2", "m3", "m4", "m5", "m6", "all"):
         from thothmind.core.pipeline_m1 import build_df_feat
 
         df_feat, snapshot = build_df_feat(cfg)
@@ -274,6 +274,61 @@ def run_experiment(config_path: str) -> str:
             "[ThothMind] saved predictions_oos.csv + signals_oos.csv + "
             "sim_oos.csv + window_metrics.csv + wf plots"
         )
+
+    # Milestone 6: ML walk-forward with conformal intervals (90%) + uncertainty gating
+    if stage in ("m6", "all"):
+        from thothmind.core.features.pipeline import infer_feature_columns
+        from thothmind.core.splits.walkforward import generate_walkforward_splits
+        from thothmind.core.backtest.walkforward_ml_conformal import run_walkforward_ml_conformal_oos
+        from thothmind.core.reports.plots import plot_equity, plot_drawdown
+
+        if df_feat is None:
+            raise RuntimeError("df_feat is required for m6, but was not built.")
+
+        feature_cols = infer_feature_columns(df_feat)
+
+        wf_cfg = cfg.get("walkforward", {})
+        train_size = int(wf_cfg.get("train_size", 756))
+        test_size = int(wf_cfg.get("test_size", 63))
+        step = int(wf_cfg.get("step", 63))
+
+        splits = generate_walkforward_splits(
+            n_rows=len(df_feat),
+            train_size=train_size,
+            test_size=test_size,
+            step=step,
+        )
+
+        cost_cfg = cfg.get("costs", {})
+        commission_bps = float(cost_cfg.get("commission_bps", 2.0))
+        slippage_k = float(cost_cfg.get("slippage_k", 0.15))
+        initial_equity = float(cfg.get("sim", {}).get("initial_equity", 1.0))
+
+        model_cfg = cfg.get("model", {})
+        conformal_cfg = cfg.get("conformal", {"alpha": 0.10})
+
+        sim_oos_df, window_metrics_df, preds_oos_df, signals_oos_df, run_metrics = run_walkforward_ml_conformal_oos(
+            df_feat=df_feat,
+            feature_cols=feature_cols,
+            splits=splits,
+            model_cfg=model_cfg,
+            conformal_cfg=conformal_cfg,
+            commission_bps=commission_bps,
+            slippage_k=slippage_k,
+            initial_equity=initial_equity,
+        )
+
+        preds_oos_df.to_csv(run_dir / "predictions_oos.csv", index=False)
+        signals_oos_df.to_csv(run_dir / "signals_oos.csv", index=False)
+        sim_oos_df.to_csv(run_dir / "sim_oos.csv", index=False)
+        window_metrics_df.to_csv(run_dir / "window_metrics.csv", index=False)
+        save_json(run_metrics, run_dir / "run_metrics.json")
+        save_json({"feature_cols": feature_cols}, run_dir / "feature_cols.json")
+
+        plot_equity(sim_oos_df, run_dir / "plots" / "wf_equity.png")
+        plot_drawdown(sim_oos_df, run_dir / "plots" / "wf_drawdown.png")
+
+        print("[ThothMind] saved conformal predictions + signals + OOS sim + window metrics + wf plots")
 
     print(f"[ThothMind] run_id = {run_id}")
     print(f"[ThothMind] artifacts -> {run_dir}")
