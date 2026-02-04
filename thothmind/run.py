@@ -16,9 +16,9 @@ def run_experiment(config_path: str) -> str:
 
     stage = cfg.get("pipeline", {}).get("stage", "m0")
 
-    # Milestone 1/2/3/4/5/6 require df_feat
+    # Milestone 1/2/3/4/5/6/7 require df_feat
     df_feat = None
-    if stage in ("m1", "m2", "m3", "m4", "m5", "m6", "all"):
+    if stage in ("m1", "m2", "m3", "m4", "m5", "m6", "m7", "all"):
         from thothmind.core.pipeline_m1 import build_df_feat
 
         df_feat, snapshot = build_df_feat(cfg)
@@ -329,6 +329,109 @@ def run_experiment(config_path: str) -> str:
         plot_drawdown(sim_oos_df, run_dir / "plots" / "wf_drawdown.png")
 
         print("[ThothMind] saved conformal predictions + signals + OOS sim + window metrics + wf plots")
+
+    # Milestone 7: Bootstrap significance on OOS outperformance (strategy vs buy&hold)
+    if stage in ("m7", "all"):
+        from thothmind.core.features.pipeline import infer_feature_columns
+        from thothmind.core.splits.walkforward import generate_walkforward_splits
+        from thothmind.core.backtest.walkforward_ml_conformal import run_walkforward_ml_conformal_oos
+        from thothmind.core.backtest.walkforward import run_walkforward_oos
+        from thothmind.core.backtest.baseline_policy import BuyHoldPolicy
+        from thothmind.core.reports.plots import plot_equity, plot_drawdown, plot_bootstrap_distribution
+        from thothmind.core.stats.significance import bootstrap_oos_outperformance
+
+        if df_feat is None:
+            raise RuntimeError("df_feat is required for m7, but was not built.")
+
+        feature_cols = infer_feature_columns(df_feat)
+
+        wf_cfg = cfg.get("walkforward", {})
+        train_size = int(wf_cfg.get("train_size", 756))
+        test_size = int(wf_cfg.get("test_size", 63))
+        step = int(wf_cfg.get("step", 63))
+
+        splits = generate_walkforward_splits(
+            n_rows=len(df_feat),
+            train_size=train_size,
+            test_size=test_size,
+            step=step,
+        )
+
+        cost_cfg = cfg.get("costs", {})
+        commission_bps = float(cost_cfg.get("commission_bps", 2.0))
+        slippage_k = float(cost_cfg.get("slippage_k", 0.15))
+        initial_equity = float(cfg.get("sim", {}).get("initial_equity", 1.0))
+
+        # --- 1) Strategy (Conformal 90%) on OOS ---
+        model_cfg = cfg.get("model", {})
+        conformal_cfg = cfg.get("conformal", {"alpha": 0.10})
+
+        sim_oos_strat, window_metrics_strat, preds_oos, sig_oos, run_metrics_strat = run_walkforward_ml_conformal_oos(
+            df_feat=df_feat,
+            feature_cols=feature_cols,
+            splits=splits,
+            model_cfg=model_cfg,
+            conformal_cfg=conformal_cfg,
+            commission_bps=commission_bps,
+            slippage_k=slippage_k,
+            initial_equity=initial_equity,
+        )
+
+        # Save strategy artifacts
+        preds_oos.to_csv(run_dir / "predictions_oos.csv", index=False)
+        sig_oos.to_csv(run_dir / "signals_oos.csv", index=False)
+        sim_oos_strat.to_csv(run_dir / "sim_oos.csv", index=False)
+        window_metrics_strat.to_csv(run_dir / "window_metrics.csv", index=False)
+        save_json(run_metrics_strat, run_dir / "run_metrics.json")
+        save_json({"feature_cols": feature_cols}, run_dir / "feature_cols.json")
+
+        plot_equity(sim_oos_strat, run_dir / "plots" / "wf_equity.png")
+        plot_drawdown(sim_oos_strat, run_dir / "plots" / "wf_drawdown.png")
+
+        # --- 2) Buy&Hold baseline on the SAME OOS protocol ---
+        bh_policy = BuyHoldPolicy()
+        bh_signals_full = bh_policy.compute_signals(df_feat)
+
+        sim_oos_bh, _, bh_metrics = run_walkforward_oos(
+            df_feat=df_feat,
+            signals_full=bh_signals_full,
+            splits=splits,
+            commission_bps=commission_bps,
+            slippage_k=slippage_k,
+            initial_equity=initial_equity,
+        )
+
+        sim_oos_bh.to_csv(run_dir / "sim_oos_buyhold.csv", index=False)
+        save_json(bh_metrics, run_dir / "run_metrics_buyhold.json")
+
+        # --- 3) Bootstrap significance ---
+        boot_cfg = cfg.get("bootstrap", {})
+        n_boot = int(boot_cfg.get("n_boot", 5000))
+        block_len = int(boot_cfg.get("block_len", 20))
+        ci_alpha = float(boot_cfg.get("ci_alpha", 0.05))
+        seed = int(boot_cfg.get("seed", int(cfg.get("run", {}).get("seed", 42))))
+
+        sig_summary, boot_df = bootstrap_oos_outperformance(
+            sim_strategy=sim_oos_strat,
+            sim_buyhold=sim_oos_bh,
+            n_boot=n_boot,
+            block_len=block_len,
+            ci_alpha=ci_alpha,
+            seed=seed,
+        )
+
+        save_json(sig_summary, run_dir / "oos_significance.json")
+        boot_df.to_csv(run_dir / "bootstrap_samples.csv", index=False)
+
+        # Plot bootstrap distribution (relative return)
+        plot_bootstrap_distribution(
+            values=boot_df["boot_rel_return"].to_numpy(),
+            actual_value=float(sig_summary["actual_rel_return"]),
+            out_path=run_dir / "plots" / "bootstrap_rel_return_hist.png",
+            title="Bootstrap OOS Outperformance vs Buy&Hold (Relative Return)",
+        )
+
+        print("[ThothMind] saved oos_significance.json + bootstrap_samples.csv + sim_oos_buyhold.csv + bootstrap plot")
 
     print(f"[ThothMind] run_id = {run_id}")
     print(f"[ThothMind] artifacts -> {run_dir}")

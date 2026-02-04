@@ -44,3 +44,20 @@ def plot_multi_equity(equity_map: dict, out_path: Path) -> None:
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
+
+from pathlib import Path
+import matplotlib.pyplot as plt
+
+
+def plot_bootstrap_distribution(values, actual_value: float, out_path: Path, title: str) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.figure()
+    plt.hist(values, bins=40)
+    plt.axvline(actual_value)
+    plt.title(title)
+    plt.xlabel("Bootstrap value")
+    plt.ylabel("Frequency")
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+
