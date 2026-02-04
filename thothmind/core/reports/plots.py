@@ -1,63 +1,29 @@
-from __future__ import annotations
-
 from pathlib import Path
 import matplotlib.pyplot as plt
-import pandas as pd
 
 
-def plot_equity(sim_df: pd.DataFrame, out_path: Path) -> None:
+def plot_drawdown(sim_df, out_path: Path) -> None:
+    """
+    Plot drawdown curve. If 'drawdown' column is missing, compute it from equity:
+      drawdown = equity / cummax(equity) - 1
+    """
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.figure()
-    plt.plot(sim_df["date"], sim_df["equity"])
-    plt.xlabel("Date")
-    plt.ylabel("Equity")
-    plt.title("Equity Curve")
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
-    plt.close()
 
+    df = sim_df.copy()
+    if "date" not in df.columns:
+        raise KeyError("plot_drawdown expects 'date' column.")
+    if "drawdown" not in df.columns:
+        if "equity" not in df.columns:
+            raise KeyError("plot_drawdown expects 'equity' if 'drawdown' is missing.")
+        eq = df["equity"].astype(float)
+        peak = eq.cummax()
+        df["drawdown"] = eq / peak - 1.0
 
-def plot_drawdown(sim_df: pd.DataFrame, out_path: Path) -> None:
-    out_path.parent.mkdir(parents=True, exist_ok=True)
     plt.figure()
-    plt.plot(sim_df["date"], sim_df["drawdown"])
+    plt.plot(df["date"], df["drawdown"])
+    plt.title("Drawdown")
     plt.xlabel("Date")
     plt.ylabel("Drawdown")
-    plt.title("Drawdown")
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
-
-def plot_multi_equity(equity_map: dict, out_path: Path) -> None:
-    """
-    Plot multiple equity curves on one chart.
-    equity_map: {label: sim_df}
-    """
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.figure()
-    for label, sim_df in equity_map.items():
-        plt.plot(sim_df["date"], sim_df["equity"], label=label)
-    plt.xlabel("Date")
-    plt.ylabel("Equity")
-    plt.title("Baselines: Equity Curves")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
-    plt.close()
-
-from pathlib import Path
-import matplotlib.pyplot as plt
-
-
-def plot_bootstrap_distribution(values, actual_value: float, out_path: Path, title: str) -> None:
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.figure()
-    plt.hist(values, bins=40)
-    plt.axvline(actual_value)
-    plt.title(title)
-    plt.xlabel("Bootstrap value")
-    plt.ylabel("Frequency")
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
-    plt.close()
-
