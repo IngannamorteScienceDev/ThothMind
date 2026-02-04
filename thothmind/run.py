@@ -16,7 +16,7 @@ def run_experiment(config_path: str) -> str:
 
     stage = cfg.get("pipeline", {}).get("stage", "m0")
 
-    # Milestone 1/2/3/4/5/6/7 require df_feat
+    # Milestone 1/2/3/4/5/6/7 require a single df_feat
     df_feat = None
     if stage in ("m1", "m2", "m3", "m4", "m5", "m6", "m7", "all"):
         from thothmind.core.pipeline_m1 import build_df_feat
@@ -127,7 +127,6 @@ def run_experiment(config_path: str) -> str:
 
             metrics_all[label] = compute_metrics(sim_df)
 
-            # Keep key curves + first random for plotting
             if (
                 label in ("buyhold", "flat", f"sma_{sma_window}")
                 or label.startswith("random_01")
@@ -362,7 +361,6 @@ def run_experiment(config_path: str) -> str:
         slippage_k = float(cost_cfg.get("slippage_k", 0.15))
         initial_equity = float(cfg.get("sim", {}).get("initial_equity", 1.0))
 
-        # --- 1) Strategy (Conformal 90%) on OOS ---
         model_cfg = cfg.get("model", {})
         conformal_cfg = cfg.get("conformal", {"alpha": 0.10})
 
@@ -377,7 +375,6 @@ def run_experiment(config_path: str) -> str:
             initial_equity=initial_equity,
         )
 
-        # Save strategy artifacts
         preds_oos.to_csv(run_dir / "predictions_oos.csv", index=False)
         sig_oos.to_csv(run_dir / "signals_oos.csv", index=False)
         sim_oos_strat.to_csv(run_dir / "sim_oos.csv", index=False)
@@ -388,7 +385,6 @@ def run_experiment(config_path: str) -> str:
         plot_equity(sim_oos_strat, run_dir / "plots" / "wf_equity.png")
         plot_drawdown(sim_oos_strat, run_dir / "plots" / "wf_drawdown.png")
 
-        # --- 2) Buy&Hold baseline on the SAME OOS protocol ---
         bh_policy = BuyHoldPolicy()
         bh_signals_full = bh_policy.compute_signals(df_feat)
 
@@ -404,7 +400,6 @@ def run_experiment(config_path: str) -> str:
         sim_oos_bh.to_csv(run_dir / "sim_oos_buyhold.csv", index=False)
         save_json(bh_metrics, run_dir / "run_metrics_buyhold.json")
 
-        # --- 3) Bootstrap significance ---
         boot_cfg = cfg.get("bootstrap", {})
         n_boot = int(boot_cfg.get("n_boot", 5000))
         block_len = int(boot_cfg.get("block_len", 20))
@@ -423,7 +418,6 @@ def run_experiment(config_path: str) -> str:
         save_json(sig_summary, run_dir / "oos_significance.json")
         boot_df.to_csv(run_dir / "bootstrap_samples.csv", index=False)
 
-        # Plot bootstrap distribution (relative return)
         plot_bootstrap_distribution(
             values=boot_df["boot_rel_return"].to_numpy(),
             actual_value=float(sig_summary["actual_rel_return"]),
@@ -432,6 +426,14 @@ def run_experiment(config_path: str) -> str:
         )
 
         print("[ThothMind] saved oos_significance.json + bootstrap_samples.csv + sim_oos_buyhold.csv + bootstrap plot")
+
+    # Milestone 8: Multi-ticker OOS suite (Conformal90 + Bootstrap vs Buy&Hold)
+    if stage in ("m8", "all"):
+        from thothmind.core.suite.multiticker import run_multiticker_suite
+
+        summary_df = run_multiticker_suite(cfg, run_dir)
+        print(f"[ThothMind] saved suite_summary.csv for {len(summary_df)} tickers")
+        print("[ThothMind] artifacts ->", run_dir / "tickers")
 
     print(f"[ThothMind] run_id = {run_id}")
     print(f"[ThothMind] artifacts -> {run_dir}")
