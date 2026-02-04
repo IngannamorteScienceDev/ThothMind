@@ -16,9 +16,9 @@ def run_experiment(config_path: str) -> str:
 
     stage = cfg.get("pipeline", {}).get("stage", "m0")
 
-    # Milestone 1: build df_feat + snapshot
+    # Milestone 1/2/3 require df_feat
     df_feat = None
-    if stage in ("m1", "m2", "all"):
+    if stage in ("m1", "m2", "m3", "all"):
         from thothmind.core.pipeline_m1 import build_df_feat
 
         df_feat, snapshot = build_df_feat(cfg)
@@ -27,7 +27,7 @@ def run_experiment(config_path: str) -> str:
         save_json(snapshot, run_dir / "data_snapshot.json")
 
         print(f"[ThothMind] saved df_feat.csv ({len(df_feat)} rows)")
-        print(f"[ThothMind] saved data_snapshot.json")
+        print("[ThothMind] saved data_snapshot.json")
 
     # Milestone 2: baseline signals + simulator + metrics + plots
     if stage in ("m2", "all"):
@@ -39,14 +39,12 @@ def run_experiment(config_path: str) -> str:
         if df_feat is None:
             raise RuntimeError("df_feat is required for m2, but was not built.")
 
-        # Baseline policy config
         pol_cfg = cfg.get("baseline_policy", {})
         sma_window = int(pol_cfg.get("sma_window", 200))
 
         policy = SMATrendPolicy(sma_window=sma_window)
         signals_df = policy.compute_signals(df_feat)
 
-        # Costs config
         cost_cfg = cfg.get("costs", {})
         commission_bps = float(cost_cfg.get("commission_bps", 2.0))
         slippage_k = float(cost_cfg.get("slippage_k", 0.15))
@@ -68,6 +66,89 @@ def run_experiment(config_path: str) -> str:
         plot_drawdown(sim_df, run_dir / "plots" / "drawdown.png")
 
         print("[ThothMind] saved sim.csv + run_metrics.json + plots/")
+
+    # Milestone 3: baselines suite + sanity checks + multi-equity plot
+    if stage in ("m3", "all"):
+        from thothmind.core.backtest.baseline_policy import (
+            BuyHoldPolicy,
+            FlatPolicy,
+            SMATrendPolicy,
+            RandomPolicy,
+        )
+        from thothmind.core.backtest.simulator import simulate_daily
+        from thothmind.core.backtest.metrics import compute_metrics
+        from thothmind.core.backtest.sanity import (
+            sanity_buyhold_matches_theory,
+            sanity_flat_has_no_pnl,
+        )
+        from thothmind.core.reports.plots import plot_multi_equity
+
+        if df_feat is None:
+            raise RuntimeError("df_feat is required for m3, but was not built.")
+
+        base_cfg = cfg.get("baselines", {})
+        sma_window = int(base_cfg.get("sma_window", 200))
+        rand_seed = int(base_cfg.get("random_seed", int(cfg.get("run", {}).get("seed", 42))))
+        rand_p_long = float(base_cfg.get("random_p_long", 0.5))
+        random_n_runs = int(base_cfg.get("random_n_runs", 1))
+
+        cost_cfg = cfg.get("costs", {})
+        commission_bps = float(cost_cfg.get("commission_bps", 2.0))
+        slippage_k = float(cost_cfg.get("slippage_k", 0.15))
+
+        policies = {
+            "buyhold": BuyHoldPolicy(),
+            "flat": FlatPolicy(),
+            f"sma_{sma_window}": SMATrendPolicy(sma_window=sma_window),
+        }
+
+        if random_n_runs <= 1:
+            policies[f"random_s{rand_seed}"] = RandomPolicy(seed=rand_seed, p_long=rand_p_long)
+        else:
+            for i in range(random_n_runs):
+                policies[f"random_{i+1:02d}"] = RandomPolicy(seed=rand_seed + i, p_long=rand_p_long)
+
+        metrics_all = {}
+        equity_map = {}
+        sanity_results = []
+
+        for label, policy in policies.items():
+            signals_df = policy.compute_signals(df_feat)
+
+            sim_df = simulate_daily(
+                df_feat=df_feat,
+                signals_df=signals_df,
+                commission_bps=commission_bps,
+                slippage_k=slippage_k,
+                initial_equity=float(cfg.get("sim", {}).get("initial_equity", 1.0)),
+            )
+
+            sim_df.to_csv(run_dir / f"sim_{label}.csv", index=False)
+
+            metrics_all[label] = compute_metrics(sim_df)
+
+            # Keep key curves + first random for plotting
+            if (
+                label in ("buyhold", "flat", f"sma_{sma_window}")
+                or label.startswith("random_01")
+                or label.startswith("random_s")
+            ):
+                equity_map[label] = sim_df
+
+            if label == "buyhold":
+                sanity_results.append(sanity_buyhold_matches_theory(sim_df))
+            if label == "flat":
+                sanity_results.append(sanity_flat_has_no_pnl(sim_df))
+
+        save_json(metrics_all, run_dir / "baselines_metrics.json")
+        save_json(sanity_results, run_dir / "sanity_checks.json")
+
+        plot_multi_equity(equity_map, run_dir / "plots" / "baselines_equity.png")
+
+        print(
+            "[ThothMind] saved baselines sims + baselines_metrics.json + "
+            "sanity_checks.json + baselines_equity.png"
+        )
 
     print(f"[ThothMind] run_id = {run_id}")
     print(f"[ThothMind] artifacts -> {run_dir}")
