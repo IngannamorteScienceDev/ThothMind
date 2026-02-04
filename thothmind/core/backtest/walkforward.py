@@ -1,26 +1,9 @@
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 from thothmind.core.backtest.metrics import compute_metrics
 from thothmind.core.backtest.simulator import simulate_daily
-
-
-def _add_continuous_equity(sim_df: pd.DataFrame, initial_equity: float = 1.0) -> pd.DataFrame:
-    """
-    Recompute continuous equity/drawdown from pnl (concatenated OOS series).
-    """
-    df = sim_df.copy().sort_values("date").reset_index(drop=True)
-
-    equity = [float(initial_equity)]
-    for i in range(1, len(df)):
-        equity.append(equity[-1] * (1.0 + float(df.loc[i, "pnl"])))
-
-    df["equity"] = equity
-    roll_max = df["equity"].cummax()
-    df["drawdown"] = df["equity"] / roll_max - 1.0
-    return df
 
 
 def run_walkforward_oos(
@@ -28,93 +11,87 @@ def run_walkforward_oos(
     signals_full: pd.DataFrame,
     splits: list[dict],
     commission_bps: float,
-    slippage_k: float,
+    slippage_bps: float,
+    slippage_vol_k: float,
     initial_equity: float = 1.0,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """
-    Walk-forward simulation:
-    - For each split, simulate ONLY on (warmup day + test window).
-    - warmup day = test_start - 1, to ensure anti-lookahead correctness:
-        signal[t] -> position[t+1]
-      Costs for entering the first OOS position land on the first OOS day.
+    Generic walk-forward runner for any precomputed signals (baselines, buy&hold).
+    Costs use new schema: slippage_bps + slippage_vol_k.
+    Equity is stitched window-to-window.
 
-    Returns:
-      - sim_oos_df: concatenated OOS sim rows for ALL windows (only test days)
-      - window_metrics_df: metrics per window
-      - run_metrics: metrics on concatenated OOS series
+    Returns: sim_oos_df, window_metrics_df, run_metrics
     """
-    if len(df_feat) != len(signals_full):
-        raise ValueError("df_feat and signals_full must have the same length.")
+    df_feat = df_feat.copy().sort_values("date").reset_index(drop=True)
+    df_feat["date"] = pd.to_datetime(df_feat["date"])
 
-    all_oos_rows = []
-    window_rows = []
+    sig = signals_full.copy()
+    sig["date"] = pd.to_datetime(sig["date"])
+    if "target_exposure" not in sig.columns:
+        raise KeyError("signals_full must contain 'target_exposure'.")
+
+    equity0 = float(initial_equity)
+
+    all_oos: list[pd.DataFrame] = []
+    window_rows: list[dict] = []
 
     for w_id, sp in enumerate(splits, start=1):
-        ts = int(sp["test_start"])
-        te = int(sp["test_end"])
         tr_s = int(sp["train_start"])
         tr_e = int(sp["train_end"])
+        ts = int(sp["test_start"])
+        te = int(sp["test_end"])
 
-        warmup = ts - 1
-        if warmup < 0:
-            # If test starts at 0 (shouldn't), no warmup
-            warmup = ts
+        # simulate on train_end..test_end span for correct turnover, then slice OOS
+        span_df = df_feat.iloc[tr_e : te + 1].copy().reset_index(drop=True)
+        span_start = span_df["date"].min()
+        span_end = span_df["date"].max()
 
-        df_window = df_feat.iloc[warmup : te + 1].copy().reset_index(drop=True)
-        sig_window = signals_full.iloc[warmup : te + 1].copy().reset_index(drop=True)
+        span_sig = sig[(sig["date"] >= span_start) & (sig["date"] <= span_end)].copy()
 
-        sim_window = simulate_daily(
-            df_feat=df_window,
-            signals_df=sig_window,
-            commission_bps=commission_bps,
-            slippage_k=slippage_k,
-            initial_equity=float(initial_equity),
+        sim_span = simulate_daily(
+            df_feat=span_df,
+            signals_df=span_sig,
+            commission_bps=float(commission_bps),
+            slippage_bps=float(slippage_bps),
+            slippage_vol_k=float(slippage_vol_k),
+            initial_equity=float(equity0),
         )
 
-        # Drop warmup row, keep only OOS test days
-        sim_test = sim_window.iloc[1:].copy().reset_index(drop=True)
+        test_start_date = df_feat.iloc[ts]["date"]
+        test_end_date = df_feat.iloc[te]["date"]
 
-        # Add window identifiers
-        sim_test["window_id"] = w_id
-        sim_test["train_start_date"] = pd.to_datetime(df_feat.iloc[tr_s]["date"])
-        sim_test["train_end_date"] = pd.to_datetime(df_feat.iloc[tr_e]["date"])
-        sim_test["test_start_date"] = pd.to_datetime(df_feat.iloc[ts]["date"])
-        sim_test["test_end_date"] = pd.to_datetime(df_feat.iloc[te]["date"])
+        sim_span["date"] = pd.to_datetime(sim_span["date"])
+        sim_oos = sim_span[(sim_span["date"] >= test_start_date) & (sim_span["date"] <= test_end_date)].copy()
+        if sim_oos.empty:
+            raise RuntimeError(f"Empty OOS slice for window {w_id}.")
 
-        # Preserve per-window equity, but rename it to avoid confusion
-        sim_test = sim_test.rename(columns={"equity": "window_equity", "drawdown": "window_drawdown"})
+        sim_oos = sim_oos.reset_index(drop=True)
+        sim_oos["window_id"] = w_id
+        sim_oos["train_start_date"] = df_feat.iloc[tr_s]["date"]
+        sim_oos["train_end_date"] = df_feat.iloc[tr_e]["date"]
+        sim_oos["test_start_date"] = test_start_date
+        sim_oos["test_end_date"] = test_end_date
 
-        # Compute per-window metrics (based on window-equity)
-        m = compute_metrics(sim_test.rename(columns={"window_equity": "equity", "window_drawdown": "drawdown"}))
+        equity0 = float(sim_oos["equity"].iloc[-1])
 
+        m = compute_metrics(sim_oos)
         window_rows.append(
             {
                 "window_id": w_id,
-                "train_start": str(df_feat.iloc[tr_s]["date"]),
-                "train_end": str(df_feat.iloc[tr_e]["date"]),
-                "test_start": str(df_feat.iloc[ts]["date"]),
-                "test_end": str(df_feat.iloc[te]["date"]),
+                "train_start": str(df_feat.iloc[tr_s]["date"].date()),
+                "train_end": str(df_feat.iloc[tr_e]["date"].date()),
+                "test_start": str(test_start_date.date()),
+                "test_end": str(test_end_date.date()),
                 "n_train": int(tr_e - tr_s + 1),
                 "n_test": int(te - ts + 1),
                 **m,
             }
         )
 
-        all_oos_rows.append(sim_test)
+        all_oos.append(sim_oos)
 
-    sim_oos = pd.concat(all_oos_rows, ignore_index=True)
-
-    # Build continuous equity/drawdown over concatenated OOS pnl
-    # Start from 1.0, chain all OOS daily pnl
-    sim_oos_cont = sim_oos.copy()
-    sim_oos_cont["equity"] = np.nan
-    sim_oos_cont["drawdown"] = np.nan
-
-    sim_oos_cont = _add_continuous_equity(sim_oos_cont, initial_equity=float(initial_equity))
-
-    # Run-level metrics on continuous equity
-    run_metrics = compute_metrics(sim_oos_cont)
-
+    sim_oos_df = pd.concat(all_oos, ignore_index=True)
     window_metrics_df = pd.DataFrame(window_rows)
+    run_metrics = compute_metrics(sim_oos_df)
 
-    return sim_oos_cont, window_metrics_df, run_metrics
+    return sim_oos_df, window_metrics_df, run_metrics

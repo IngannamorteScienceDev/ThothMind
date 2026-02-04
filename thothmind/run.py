@@ -1,7 +1,99 @@
+# thothmind/run.py
 import argparse
+from typing import Any, Callable, Dict, Tuple
 
 from .config import load_config, save_json
 from .registry import make_run_id, init_run_dir, write_run_artifacts
+
+
+def _read_costs(cfg: Dict[str, Any]) -> Dict[str, float]:
+    """
+    Read trading cost params from config.
+
+    Supports BOTH schemas:
+      - New (recommended):
+          costs:
+            commission_bps: 2.0
+            slippage_bps: 1.0
+            slippage_vol_k: 10.0
+
+      - Legacy:
+          costs:
+            commission_bps: 2.0
+            slippage_k: 0.15
+    """
+    cost_cfg = cfg.get("costs", {}) or {}
+    commission_bps = float(cost_cfg.get("commission_bps", 2.0))
+
+    # New schema
+    slippage_bps = float(cost_cfg.get("slippage_bps", 1.0))
+    slippage_vol_k = float(cost_cfg.get("slippage_vol_k", 10.0))
+
+    # Legacy schema (kept for backward compatibility)
+    slippage_k_legacy = float(cost_cfg.get("slippage_k", 0.15))
+
+    return {
+        "commission_bps": commission_bps,
+        "slippage_bps": slippage_bps,
+        "slippage_vol_k": slippage_vol_k,
+        "slippage_k_legacy": slippage_k_legacy,
+    }
+
+
+def _simulate_daily_adapter(
+    df_feat,
+    signals_df,
+    *,
+    commission_bps: float,
+    slippage_bps: float,
+    slippage_vol_k: float,
+    slippage_k_legacy: float,
+    initial_equity: float,
+):
+    """
+    Call simulator in a way that works with both old/new simulate_daily signatures.
+    """
+    from thothmind.core.backtest.simulator import simulate_daily
+
+    try:
+        # New simulator signature (recommended)
+        return simulate_daily(
+            df_feat=df_feat,
+            signals_df=signals_df,
+            commission_bps=commission_bps,
+            slippage_bps=slippage_bps,
+            slippage_vol_k=slippage_vol_k,
+            initial_equity=initial_equity,
+        )
+    except TypeError:
+        # Legacy simulator signature (older)
+        return simulate_daily(
+            df_feat=df_feat,
+            signals_df=signals_df,
+            commission_bps=commission_bps,
+            slippage_k=slippage_k_legacy,
+            initial_equity=initial_equity,
+        )
+
+
+def _call_with_costs_adapter(func: Callable, kwargs: Dict[str, Any], costs: Dict[str, float]):
+    """
+    Call core functions that may accept either:
+      - (commission_bps, slippage_bps, slippage_vol_k)
+      - OR legacy (commission_bps, slippage_k)
+
+    We try new kwargs first, then fallback to legacy.
+    """
+    try:
+        return func(**kwargs)
+    except TypeError:
+        # Drop new params and pass legacy slippage_k if needed
+        kwargs2 = dict(kwargs)
+        kwargs2.pop("slippage_bps", None)
+        kwargs2.pop("slippage_vol_k", None)
+        if "slippage_k" not in kwargs2:
+            kwargs2["slippage_k"] = costs["slippage_k_legacy"]
+        return func(**kwargs2)
 
 
 def run_experiment(config_path: str) -> str:
@@ -15,6 +107,16 @@ def run_experiment(config_path: str) -> str:
     write_run_artifacts(run_dir, cfg)
 
     stage = cfg.get("pipeline", {}).get("stage", "m0")
+
+    # Costs (supports old/new)
+    costs = _read_costs(cfg)
+    commission_bps = costs["commission_bps"]
+    slippage_bps = costs["slippage_bps"]
+    slippage_vol_k = costs["slippage_vol_k"]
+    slippage_k_legacy = costs["slippage_k_legacy"]
+
+    # Sim init
+    initial_equity = float(cfg.get("sim", {}).get("initial_equity", 1.0))
 
     # Milestone 1/2/3/4/5/6/7 require a single df_feat
     df_feat = None
@@ -32,33 +134,29 @@ def run_experiment(config_path: str) -> str:
     # Milestone 2: baseline signals + simulator + metrics + plots
     if stage in ("m2", "all"):
         from thothmind.core.backtest.baseline_policy import SMATrendPolicy
-        from thothmind.core.backtest.simulator import simulate_daily
         from thothmind.core.backtest.metrics import compute_metrics
         from thothmind.core.reports.plots import plot_equity, plot_drawdown
 
         if df_feat is None:
             raise RuntimeError("df_feat is required for m2, but was not built.")
 
-        pol_cfg = cfg.get("baseline_policy", {})
+        pol_cfg = cfg.get("baseline_policy", {}) or {}
         sma_window = int(pol_cfg.get("sma_window", 200))
 
         policy = SMATrendPolicy(sma_window=sma_window)
         signals_df = policy.compute_signals(df_feat)
 
-        cost_cfg = cfg.get("costs", {})
-        commission_bps = float(cost_cfg.get("commission_bps", 2.0))
-        slippage_k = float(cost_cfg.get("slippage_k", 0.15))
-
-        sim_df = simulate_daily(
-            df_feat=df_feat,
-            signals_df=signals_df,
+        sim_df = _simulate_daily_adapter(
+            df_feat,
+            signals_df,
             commission_bps=commission_bps,
-            slippage_k=slippage_k,
-            initial_equity=float(cfg.get("sim", {}).get("initial_equity", 1.0)),
+            slippage_bps=slippage_bps,
+            slippage_vol_k=slippage_vol_k,
+            slippage_k_legacy=slippage_k_legacy,
+            initial_equity=initial_equity,
         )
 
         sim_df.to_csv(run_dir / "sim.csv", index=False)
-
         metrics = compute_metrics(sim_df)
         save_json(metrics, run_dir / "run_metrics.json")
 
@@ -75,7 +173,6 @@ def run_experiment(config_path: str) -> str:
             SMATrendPolicy,
             RandomPolicy,
         )
-        from thothmind.core.backtest.simulator import simulate_daily
         from thothmind.core.backtest.metrics import compute_metrics
         from thothmind.core.backtest.sanity import (
             sanity_buyhold_matches_theory,
@@ -86,15 +183,11 @@ def run_experiment(config_path: str) -> str:
         if df_feat is None:
             raise RuntimeError("df_feat is required for m3, but was not built.")
 
-        base_cfg = cfg.get("baselines", {})
+        base_cfg = cfg.get("baselines", {}) or {}
         sma_window = int(base_cfg.get("sma_window", 200))
         rand_seed = int(base_cfg.get("random_seed", int(cfg.get("run", {}).get("seed", 42))))
         rand_p_long = float(base_cfg.get("random_p_long", 0.5))
         random_n_runs = int(base_cfg.get("random_n_runs", 1))
-
-        cost_cfg = cfg.get("costs", {})
-        commission_bps = float(cost_cfg.get("commission_bps", 2.0))
-        slippage_k = float(cost_cfg.get("slippage_k", 0.15))
 
         policies = {
             "buyhold": BuyHoldPolicy(),
@@ -115,16 +208,17 @@ def run_experiment(config_path: str) -> str:
         for label, policy in policies.items():
             signals_df = policy.compute_signals(df_feat)
 
-            sim_df = simulate_daily(
-                df_feat=df_feat,
-                signals_df=signals_df,
+            sim_df = _simulate_daily_adapter(
+                df_feat,
+                signals_df,
                 commission_bps=commission_bps,
-                slippage_k=slippage_k,
-                initial_equity=float(cfg.get("sim", {}).get("initial_equity", 1.0)),
+                slippage_bps=slippage_bps,
+                slippage_vol_k=slippage_vol_k,
+                slippage_k_legacy=slippage_k_legacy,
+                initial_equity=initial_equity,
             )
 
             sim_df.to_csv(run_dir / f"sim_{label}.csv", index=False)
-
             metrics_all[label] = compute_metrics(sim_df)
 
             if (
@@ -141,7 +235,6 @@ def run_experiment(config_path: str) -> str:
 
         save_json(metrics_all, run_dir / "baselines_metrics.json")
         save_json(sanity_results, run_dir / "sanity_checks.json")
-
         plot_multi_equity(equity_map, run_dir / "plots" / "baselines_equity.png")
 
         print(
@@ -164,12 +257,12 @@ def run_experiment(config_path: str) -> str:
         if df_feat is None:
             raise RuntimeError("df_feat is required for m4, but was not built.")
 
-        wf_cfg = cfg.get("walkforward", {})
+        wf_cfg = cfg.get("walkforward", {}) or {}
         train_size = int(wf_cfg.get("train_size", 756))
         test_size = int(wf_cfg.get("test_size", 63))
         step = int(wf_cfg.get("step", 63))
 
-        pol_cfg = cfg.get("wf_policy", {})
+        pol_cfg = cfg.get("wf_policy", {}) or {}
         policy_type = str(pol_cfg.get("type", "sma")).lower()
 
         if policy_type == "buyhold":
@@ -186,11 +279,6 @@ def run_experiment(config_path: str) -> str:
 
         signals_full = policy.compute_signals(df_feat)
 
-        cost_cfg = cfg.get("costs", {})
-        commission_bps = float(cost_cfg.get("commission_bps", 2.0))
-        slippage_k = float(cost_cfg.get("slippage_k", 0.15))
-        initial_equity = float(cfg.get("sim", {}).get("initial_equity", 1.0))
-
         splits = generate_walkforward_splits(
             n_rows=len(df_feat),
             train_size=train_size,
@@ -198,13 +286,17 @@ def run_experiment(config_path: str) -> str:
             step=step,
         )
 
-        sim_oos_df, window_metrics_df, run_metrics = run_walkforward_oos(
+        kwargs = dict(
             df_feat=df_feat,
             signals_full=signals_full,
             splits=splits,
             commission_bps=commission_bps,
-            slippage_k=slippage_k,
+            slippage_bps=slippage_bps,
+            slippage_vol_k=slippage_vol_k,
             initial_equity=initial_equity,
+        )
+        sim_oos_df, window_metrics_df, run_metrics = _call_with_costs_adapter(
+            run_walkforward_oos, kwargs, costs
         )
 
         sim_oos_df.to_csv(run_dir / "sim_oos.csv", index=False)
@@ -228,7 +320,7 @@ def run_experiment(config_path: str) -> str:
 
         feature_cols = infer_feature_columns(df_feat)
 
-        wf_cfg = cfg.get("walkforward", {})
+        wf_cfg = cfg.get("walkforward", {}) or {}
         train_size = int(wf_cfg.get("train_size", 756))
         test_size = int(wf_cfg.get("test_size", 63))
         step = int(wf_cfg.get("step", 63))
@@ -240,23 +332,22 @@ def run_experiment(config_path: str) -> str:
             step=step,
         )
 
-        cost_cfg = cfg.get("costs", {})
-        commission_bps = float(cost_cfg.get("commission_bps", 2.0))
-        slippage_k = float(cost_cfg.get("slippage_k", 0.15))
-        initial_equity = float(cfg.get("sim", {}).get("initial_equity", 1.0))
+        model_cfg = cfg.get("model", {}) or {}
+        decision_cfg = cfg.get("decision", {}) or {}
 
-        model_cfg = cfg.get("model", {})
-        decision_cfg = cfg.get("decision", {})
-
-        sim_oos_df, window_metrics_df, preds_oos_df, signals_oos_df, run_metrics = run_walkforward_ml_oos(
+        kwargs = dict(
             df_feat=df_feat,
             feature_cols=feature_cols,
             splits=splits,
             model_cfg=model_cfg,
             decision_cfg=decision_cfg,
             commission_bps=commission_bps,
-            slippage_k=slippage_k,
+            slippage_bps=slippage_bps,
+            slippage_vol_k=slippage_vol_k,
             initial_equity=initial_equity,
+        )
+        sim_oos_df, window_metrics_df, preds_oos_df, signals_oos_df, run_metrics = _call_with_costs_adapter(
+            run_walkforward_ml_oos, kwargs, costs
         )
 
         preds_oos_df.to_csv(run_dir / "predictions_oos.csv", index=False)
@@ -286,7 +377,7 @@ def run_experiment(config_path: str) -> str:
 
         feature_cols = infer_feature_columns(df_feat)
 
-        wf_cfg = cfg.get("walkforward", {})
+        wf_cfg = cfg.get("walkforward", {}) or {}
         train_size = int(wf_cfg.get("train_size", 756))
         test_size = int(wf_cfg.get("test_size", 63))
         step = int(wf_cfg.get("step", 63))
@@ -298,23 +389,22 @@ def run_experiment(config_path: str) -> str:
             step=step,
         )
 
-        cost_cfg = cfg.get("costs", {})
-        commission_bps = float(cost_cfg.get("commission_bps", 2.0))
-        slippage_k = float(cost_cfg.get("slippage_k", 0.15))
-        initial_equity = float(cfg.get("sim", {}).get("initial_equity", 1.0))
+        model_cfg = cfg.get("model", {}) or {}
+        conformal_cfg = cfg.get("conformal", {"alpha": 0.10}) or {"alpha": 0.10}
 
-        model_cfg = cfg.get("model", {})
-        conformal_cfg = cfg.get("conformal", {"alpha": 0.10})
-
-        sim_oos_df, window_metrics_df, preds_oos_df, signals_oos_df, run_metrics = run_walkforward_ml_conformal_oos(
+        kwargs = dict(
             df_feat=df_feat,
             feature_cols=feature_cols,
             splits=splits,
             model_cfg=model_cfg,
             conformal_cfg=conformal_cfg,
             commission_bps=commission_bps,
-            slippage_k=slippage_k,
+            slippage_bps=slippage_bps,
+            slippage_vol_k=slippage_vol_k,
             initial_equity=initial_equity,
+        )
+        sim_oos_df, window_metrics_df, preds_oos_df, signals_oos_df, run_metrics = _call_with_costs_adapter(
+            run_walkforward_ml_conformal_oos, kwargs, costs
         )
 
         preds_oos_df.to_csv(run_dir / "predictions_oos.csv", index=False)
@@ -344,7 +434,7 @@ def run_experiment(config_path: str) -> str:
 
         feature_cols = infer_feature_columns(df_feat)
 
-        wf_cfg = cfg.get("walkforward", {})
+        wf_cfg = cfg.get("walkforward", {}) or {}
         train_size = int(wf_cfg.get("train_size", 756))
         test_size = int(wf_cfg.get("test_size", 63))
         step = int(wf_cfg.get("step", 63))
@@ -356,23 +446,22 @@ def run_experiment(config_path: str) -> str:
             step=step,
         )
 
-        cost_cfg = cfg.get("costs", {})
-        commission_bps = float(cost_cfg.get("commission_bps", 2.0))
-        slippage_k = float(cost_cfg.get("slippage_k", 0.15))
-        initial_equity = float(cfg.get("sim", {}).get("initial_equity", 1.0))
+        model_cfg = cfg.get("model", {}) or {}
+        conformal_cfg = cfg.get("conformal", {"alpha": 0.10}) or {"alpha": 0.10}
 
-        model_cfg = cfg.get("model", {})
-        conformal_cfg = cfg.get("conformal", {"alpha": 0.10})
-
-        sim_oos_strat, window_metrics_strat, preds_oos, sig_oos, run_metrics_strat = run_walkforward_ml_conformal_oos(
+        kwargs_strat = dict(
             df_feat=df_feat,
             feature_cols=feature_cols,
             splits=splits,
             model_cfg=model_cfg,
             conformal_cfg=conformal_cfg,
             commission_bps=commission_bps,
-            slippage_k=slippage_k,
+            slippage_bps=slippage_bps,
+            slippage_vol_k=slippage_vol_k,
             initial_equity=initial_equity,
+        )
+        sim_oos_strat, window_metrics_strat, preds_oos, sig_oos, run_metrics_strat = _call_with_costs_adapter(
+            run_walkforward_ml_conformal_oos, kwargs_strat, costs
         )
 
         preds_oos.to_csv(run_dir / "predictions_oos.csv", index=False)
@@ -385,22 +474,25 @@ def run_experiment(config_path: str) -> str:
         plot_equity(sim_oos_strat, run_dir / "plots" / "wf_equity.png")
         plot_drawdown(sim_oos_strat, run_dir / "plots" / "wf_drawdown.png")
 
+        # Buy&Hold baseline under SAME WF protocol
         bh_policy = BuyHoldPolicy()
         bh_signals_full = bh_policy.compute_signals(df_feat)
 
-        sim_oos_bh, _, bh_metrics = run_walkforward_oos(
+        kwargs_bh = dict(
             df_feat=df_feat,
             signals_full=bh_signals_full,
             splits=splits,
             commission_bps=commission_bps,
-            slippage_k=slippage_k,
+            slippage_bps=slippage_bps,
+            slippage_vol_k=slippage_vol_k,
             initial_equity=initial_equity,
         )
+        sim_oos_bh, _, bh_metrics = _call_with_costs_adapter(run_walkforward_oos, kwargs_bh, costs)
 
         sim_oos_bh.to_csv(run_dir / "sim_oos_buyhold.csv", index=False)
         save_json(bh_metrics, run_dir / "run_metrics_buyhold.json")
 
-        boot_cfg = cfg.get("bootstrap", {})
+        boot_cfg = cfg.get("bootstrap", {}) or {}
         n_boot = int(boot_cfg.get("n_boot", 5000))
         block_len = int(boot_cfg.get("block_len", 20))
         ci_alpha = float(boot_cfg.get("ci_alpha", 0.05))
@@ -427,7 +519,7 @@ def run_experiment(config_path: str) -> str:
 
         print("[ThothMind] saved oos_significance.json + bootstrap_samples.csv + sim_oos_buyhold.csv + bootstrap plot")
 
-    # Milestone 8: Multi-ticker OOS suite (Conformal90 + Bootstrap vs Buy&Hold)
+    # Milestone 8: Multi-ticker OOS suite
     if stage in ("m8", "all"):
         from thothmind.core.suite.multiticker import run_multiticker_suite
 
