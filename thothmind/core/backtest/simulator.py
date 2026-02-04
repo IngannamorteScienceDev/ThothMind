@@ -3,8 +3,16 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from thothmind.core.execution.costs import compute_costs
-from thothmind.core.execution.position import PositionManager
+
+def _pick_return_column(df: pd.DataFrame) -> str:
+    """
+    Pick a reasonable realized return column for simulation.
+    Priority: 'y' (common in this project) -> 'ret' -> 'return' -> 'r'
+    """
+    for c in ["y", "ret", "return", "r"]:
+        if c in df.columns:
+            return c
+    raise KeyError("No return column found. Expected one of: y, ret, return, r")
 
 
 def simulate_daily(
@@ -15,96 +23,109 @@ def simulate_daily(
     initial_equity: float = 1.0,
 ) -> pd.DataFrame:
     """
-    Event-driven daily simulation with strict anti-lookahead:
-    - signal[t] decides target_exposure[t]
-    - position is applied at t+1:
-        position[t] = target_exposure[t-1]
+    Daily simulator with exposure in [0..1] (or [-1..1] if you ever add shorts).
 
-    pnl[t] = position[t-1] * ret_1d[t] - cost[t]
-    (cost[t] is paid when changing position at t, i.e. turnover[t])
+    Key principles (professional):
+    - Commission is charged on TURNOVER (change in exposure), not every day.
+    - commission_bps is basis points, so rate = bps / 10000.
+    - Slippage is also charged on turnover and scaled by volatility proxy.
+
+    Output columns (stable contract):
+    date, target_exposure, exposure, turnover,
+    gross_ret, commission_cost, slippage_cost, total_cost, net_ret,
+    pnl, equity
     """
-    df = df_feat.copy().sort_values("date").reset_index(drop=True)
+    if df_feat is None or len(df_feat) == 0:
+        return pd.DataFrame()
 
-    # Merge signals (computed on same dates as df_feat)
-    s = signals_df[["date", "target_exposure", "signal_name"]].copy()
-    s["date"] = pd.to_datetime(s["date"])
-    df = df.merge(s, on="date", how="left")
+    df = df_feat.copy()
 
-    if df["target_exposure"].isna().any():
-        # For early rows where SMA can't be computed, default to 0 exposure
-        df["target_exposure"] = df["target_exposure"].fillna(0.0)
-    df["signal_name"] = df["signal_name"].fillna("baseline")
+    # Ensure dates comparable
+    df["date"] = pd.to_datetime(df["date"])
+    sig = signals_df.copy()
+    sig["date"] = pd.to_datetime(sig["date"])
 
-    # Anti-lookahead: apply yesterday's target as today's position
-    df["target_exposure_shifted"] = df["target_exposure"].shift(1).fillna(0.0)
+    if "target_exposure" not in sig.columns:
+        raise KeyError("signals_df must contain 'target_exposure' column.")
 
-    pm = PositionManager()
+    # Merge target_exposure onto df
+    sig = sig[["date", "target_exposure"]].drop_duplicates("date").sort_values("date")
+    df = df.sort_values("date")
+    df = pd.merge(df, sig, on="date", how="left")
 
-    positions = []
-    turnovers = []
-    commission_costs = []
-    slippage_costs = []
-    total_costs = []
+    # Fill exposure: if signal missing -> keep previous, start from 0
+    df["target_exposure"] = df["target_exposure"].astype(float)
+    df["target_exposure"] = df["target_exposure"].ffill().fillna(0.0)
 
-    prev_pos = 0.0
-    for i in range(len(df)):
-        tgt = float(df.loc[i, "target_exposure_shifted"])
-        step = pm.step(prev_position=prev_pos, target_exposure=tgt)
-        pos = step["position"]
-        tnover = step["turnover"]
+    # Clamp (safety)
+    df["target_exposure"] = df["target_exposure"].clip(-1.0, 1.0)
 
-        rv = float(df.loc[i, "realized_vol"]) if "realized_vol" in df.columns else float(df.loc[i, "ret_1d"])
-        if np.isnan(rv):
-            rv = 0.0
+    # Exposure used for return on the same row.
+    # (If later you want strict t->t+1 execution, shift here by 1)
+    df["exposure"] = df["target_exposure"]
 
-        cost = compute_costs(
-            turnover=tnover,
-            realized_vol=rv,
-            commission_bps=commission_bps,
-            slippage_k=slippage_k,
-        )
+    prev_exp = df["exposure"].shift(1).fillna(0.0)
+    df["turnover"] = (df["exposure"] - prev_exp).abs()
 
-        positions.append(pos)
-        turnovers.append(tnover)
-        commission_costs.append(cost["commission_cost"])
-        slippage_costs.append(cost["slippage_cost"])
-        total_costs.append(cost["total_cost"])
+    # Realized return column
+    r_col = _pick_return_column(df)
+    r = df[r_col].astype(float).to_numpy()
 
-        prev_pos = pos
+    # Commission in bps => fraction of equity
+    commission_rate = float(commission_bps) / 10000.0
+    df["commission_cost"] = df["turnover"] * commission_rate
 
-    df["position"] = positions
-    df["turnover"] = turnovers
-    df["commission_cost"] = commission_costs
-    df["slippage_cost"] = slippage_costs
-    df["total_cost"] = total_costs
+    # Slippage: turnover * vol_proxy * k
+    if "realized_vol" in df.columns:
+        vol = df["realized_vol"].astype(float).to_numpy()
+        vol = np.where(np.isfinite(vol), vol, 0.0)
+        vol_proxy = np.clip(vol, 0.0, 10.0)  # hard safety cap
+    else:
+        # fallback proxy if vol feature missing
+        vol_proxy = np.abs(r)
 
-    # pnl uses previous day's position (standard: held through day)
-    df["position_prev"] = df["position"].shift(1).fillna(0.0)
-    df["pnl"] = df["position_prev"] * df["ret_1d"] - df["total_cost"]
+    df["slippage_cost"] = df["turnover"] * float(slippage_k) * vol_proxy
+
+    df["total_cost"] = df["commission_cost"] + df["slippage_cost"]
+
+    # Gross return from exposure
+    df["gross_ret"] = df["exposure"] * r
+
+    # Net return subtracting costs
+    df["net_ret"] = df["gross_ret"] - df["total_cost"]
 
     # Equity curve
-    equity = [float(initial_equity)]
-    for i in range(1, len(df)):
-        equity.append(equity[-1] * (1.0 + float(df.loc[i, "pnl"])))
+    equity = np.empty(len(df), dtype=float)
+    pnl = np.empty(len(df), dtype=float)
+
+    eq = float(initial_equity)
+    for i in range(len(df)):
+        ret_i = float(df["net_ret"].iloc[i])
+        # protect against blowing below zero in log-space
+        eq_next = eq * (1.0 + ret_i)
+        pnl[i] = eq * ret_i
+        eq = max(eq_next, 1e-12)  # keep strictly positive
+        equity[i] = eq
+
+    df["pnl"] = pnl
     df["equity"] = equity
 
-    # Drawdown
-    roll_max = df["equity"].cummax()
-    df["drawdown"] = df["equity"] / roll_max - 1.0
-
-    # Keep important columns up front (but preserve others too)
-    front = [
-        "date", "ticker", "close", "ret_1d",
-        "signal_name", "target_exposure", "position", "turnover",
-        "commission_cost", "slippage_cost", "total_cost",
-        "pnl", "equity", "drawdown",
+    # Return stable minimal set + keep extra columns if needed elsewhere
+    out_cols = [
+        "date",
+        "target_exposure",
+        "exposure",
+        "turnover",
+        "gross_ret",
+        "commission_cost",
+        "slippage_cost",
+        "total_cost",
+        "net_ret",
+        "pnl",
+        "equity",
     ]
-    # Add regime columns if present
-    for c in ["trend_state", "vol_state", "market_regime", "realized_vol"]:
-        if c in df.columns:
-            front.append(c)
+    # keep ticker if exists (useful)
+    if "ticker" in df.columns:
+        out_cols.insert(1, "ticker")
 
-    cols = front + [c for c in df.columns if c not in front]
-    df = df[cols]
-
-    return df
+    return df[out_cols].copy()
