@@ -18,20 +18,27 @@ def simulate_daily(
     slippage_bps: float = 1.0,
     slippage_vol_k: float = 10.0,
     initial_equity: float = 1.0,
+    execution_lag: int = 0,
 ) -> pd.DataFrame:
     """
     Daily simulator with realistic costs:
 
     - Commission: turnover * (commission_bps / 10000)
-    - Slippage:  turnover * ((slippage_bps + slippage_vol_k * vol_bps) / 10000)
+    - Slippage:  turnover * ((slippage_bps + slippage_vol_k * vol_frac) / 10000)
 
-      where vol_bps is daily volatility proxy in bps:
-        vol_bps ≈ |return| * 10000  (or realized_vol if it is already daily vol in fraction)
+      where vol_frac is daily volatility proxy in fraction:
+        vol_frac ≈ realized_vol (if provided, fraction) OR |return| (fraction)
 
-    This prevents "percent-per-day" slippage explosions.
+    execution_lag:
+      - 0: execute same day (exposure_t = target_exposure_t)
+      - 1: execute next day (exposure_t = target_exposure_{t-1}) to avoid lookahead
     """
     if df_feat is None or len(df_feat) == 0:
         return pd.DataFrame()
+
+    lag = int(execution_lag)
+    if lag < 0:
+        raise ValueError("execution_lag must be >= 0")
 
     df = df_feat.copy()
     df["date"] = pd.to_datetime(df["date"])
@@ -45,8 +52,16 @@ def simulate_daily(
     df = df.sort_values("date")
     df = pd.merge(df, sig, on="date", how="left")
 
-    df["target_exposure"] = df["target_exposure"].astype(float).ffill().fillna(0.0).clip(-1.0, 1.0)
-    df["exposure"] = df["target_exposure"]
+    # Target exposure is the "desired" exposure for that date (signal-time series)
+    df["target_exposure"] = (
+        df["target_exposure"].astype(float).ffill().fillna(0.0).clip(-1.0, 1.0)
+    )
+
+    # Executed exposure: apply lag to avoid lookahead (signal at t -> execution at t+lag)
+    if lag == 0:
+        df["exposure"] = df["target_exposure"]
+    else:
+        df["exposure"] = df["target_exposure"].shift(lag).fillna(0.0).clip(-1.0, 1.0)
 
     prev_exp = df["exposure"].shift(1).fillna(0.0)
     df["turnover"] = (df["exposure"] - prev_exp).abs()
@@ -58,22 +73,22 @@ def simulate_daily(
     commission_rate = float(commission_bps) / 10000.0
     df["commission_cost"] = df["turnover"] * commission_rate
 
-    # Volatility proxy in bps (daily)
-    # If realized_vol exists and is fraction (e.g., 0.01 for 1%), convert to bps.
+    # Volatility proxy (fraction)
     if "realized_vol" in df.columns:
         vol = df["realized_vol"].astype(float).to_numpy()
         vol = np.where(np.isfinite(vol), vol, 0.0)
         vol = np.clip(vol, 0.0, 1.0)  # daily vol above 100% makes no sense
-        vol_bps = vol * 10000.0
+        vol_frac = vol
     else:
-        vol_bps = np.abs(r) * 10000.0
+        vol_frac = np.abs(r)
 
-    # Slippage (bps) scaled by vol_bps
-    slip_bps_eff = float(slippage_bps) + float(slippage_vol_k) * (vol_bps / 10000.0)  # convert back to fraction-of-1 scale
-    # But keep it in bps and cap
-    slip_bps_eff = np.clip(slip_bps_eff, 0.0, 50.0)  # cap at 50 bps per turnover (very conservative)
+    # Slippage (bps) scaled by volatility fraction
+    slip_bps_eff = float(slippage_bps) + float(slippage_vol_k) * vol_frac
+
+    # Cap slippage in bps per turnover
+    slip_bps_eff = np.clip(slip_bps_eff, 0.0, 50.0)
+
     df["slippage_cost"] = df["turnover"] * (slip_bps_eff / 10000.0)
-
     df["total_cost"] = df["commission_cost"] + df["slippage_cost"]
 
     df["gross_ret"] = df["exposure"] * r

@@ -20,11 +20,16 @@ def run_walkforward_ml_conformal_oos(
     slippage_bps: float,
     slippage_vol_k: float,
     initial_equity: float = 1.0,
+    execution_lag: int = 0,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
     """
     Walk-forward ML + split conformal intervals.
     Costs use new schema: slippage in bps + volatility scaling.
     Equity is stitched window-to-window.
+
+    execution_lag:
+      - 0: execute same day (exposure_t = target_exposure_t)
+      - 1: execute next day (exposure_t = target_exposure_{t-1}) to avoid lookahead
 
     Returns:
       sim_oos_df, window_metrics_df, predictions_oos_df, signals_oos_df, run_metrics
@@ -54,6 +59,10 @@ def run_walkforward_ml_conformal_oos(
 
     equity0 = float(initial_equity)
     cov = int((1.0 - alpha) * 100)
+
+    lag = int(execution_lag)
+    if lag < 0:
+        raise ValueError("execution_lag must be >= 0")
 
     for w_id, sp in enumerate(splits, start=1):
         tr_s = int(sp["train_start"])
@@ -112,6 +121,7 @@ def run_walkforward_ml_conformal_oos(
             slippage_bps=float(slippage_bps),
             slippage_vol_k=float(slippage_vol_k),
             initial_equity=float(equity0),
+            execution_lag=lag,
         )
 
         test_start_date = df_feat.iloc[ts]["date"]
@@ -145,6 +155,7 @@ def run_walkforward_ml_conformal_oos(
                 "calib_size_used": int(len(calib_df)),
                 "alpha": float(alpha),
                 "qhat": float(qhat),
+                "execution_lag": int(lag),
                 **m,
             }
         )
