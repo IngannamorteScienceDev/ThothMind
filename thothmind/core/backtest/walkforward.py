@@ -14,11 +14,16 @@ def run_walkforward_oos(
     slippage_bps: float,
     slippage_vol_k: float,
     initial_equity: float = 1.0,
+    execution_lag: int = 0,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """
     Generic walk-forward runner for any precomputed signals (baselines, buy&hold).
     Costs use new schema: slippage_bps + slippage_vol_k.
     Equity is stitched window-to-window.
+
+    execution_lag:
+      - 0: execute same day (exposure_t = target_exposure_t)
+      - 1: execute next day (exposure_t = target_exposure_{t-1}) to avoid lookahead
 
     Returns: sim_oos_df, window_metrics_df, run_metrics
     """
@@ -29,6 +34,10 @@ def run_walkforward_oos(
     sig["date"] = pd.to_datetime(sig["date"])
     if "target_exposure" not in sig.columns:
         raise KeyError("signals_full must contain 'target_exposure'.")
+
+    lag = int(execution_lag)
+    if lag < 0:
+        raise ValueError("execution_lag must be >= 0")
 
     equity0 = float(initial_equity)
 
@@ -55,6 +64,7 @@ def run_walkforward_oos(
             slippage_bps=float(slippage_bps),
             slippage_vol_k=float(slippage_vol_k),
             initial_equity=float(equity0),
+            execution_lag=lag,
         )
 
         test_start_date = df_feat.iloc[ts]["date"]
@@ -84,6 +94,7 @@ def run_walkforward_oos(
                 "test_end": str(test_end_date.date()),
                 "n_train": int(tr_e - tr_s + 1),
                 "n_test": int(te - ts + 1),
+                "execution_lag": int(lag),
                 **m,
             }
         )
