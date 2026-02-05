@@ -1,6 +1,6 @@
 # thothmind/run.py
 import argparse
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict
 
 from .config import load_config, save_json
 from .registry import make_run_id, init_run_dir, write_run_artifacts
@@ -40,6 +40,23 @@ def _read_costs(cfg: Dict[str, Any]) -> Dict[str, float]:
     }
 
 
+def _read_execution_lag(cfg: Dict[str, Any]) -> int:
+    """
+    Read execution lag from config.
+
+    sim:
+      execution_lag: 0 or 1 (recommended 1 for lookahead-safe execution)
+    """
+    sim_cfg = cfg.get("sim", {}) or {}
+    try:
+        lag = int(sim_cfg.get("execution_lag", 0))
+    except Exception:
+        lag = 0
+    if lag < 0:
+        lag = 0
+    return lag
+
+
 def _simulate_daily_adapter(
     df_feat,
     signals_df,
@@ -49,11 +66,16 @@ def _simulate_daily_adapter(
     slippage_vol_k: float,
     slippage_k_legacy: float,
     initial_equity: float,
+    execution_lag: int,
 ):
     """
     Call simulator in a way that works with both old/new simulate_daily signatures.
     """
     from thothmind.core.backtest.simulator import simulate_daily
+
+    lag = int(execution_lag)
+    if lag < 0:
+        lag = 0
 
     try:
         # New simulator signature (recommended)
@@ -64,6 +86,7 @@ def _simulate_daily_adapter(
             slippage_bps=slippage_bps,
             slippage_vol_k=slippage_vol_k,
             initial_equity=initial_equity,
+            execution_lag=lag,
         )
     except TypeError:
         # Legacy simulator signature (older)
@@ -117,6 +140,13 @@ def run_experiment(config_path: str) -> str:
 
     # Sim init
     initial_equity = float(cfg.get("sim", {}).get("initial_equity", 1.0))
+    execution_lag = _read_execution_lag(cfg)
+
+    # Save execution settings for reproducibility
+    save_json(
+        {"initial_equity": float(initial_equity), "execution_lag": int(execution_lag)},
+        run_dir / "sim_config.json",
+    )
 
     # Milestone 1/2/3/4/5/6/7 require a single df_feat
     df_feat = None
@@ -154,6 +184,7 @@ def run_experiment(config_path: str) -> str:
             slippage_vol_k=slippage_vol_k,
             slippage_k_legacy=slippage_k_legacy,
             initial_equity=initial_equity,
+            execution_lag=execution_lag,
         )
 
         sim_df.to_csv(run_dir / "sim.csv", index=False)
@@ -216,6 +247,7 @@ def run_experiment(config_path: str) -> str:
                 slippage_vol_k=slippage_vol_k,
                 slippage_k_legacy=slippage_k_legacy,
                 initial_equity=initial_equity,
+                execution_lag=execution_lag,
             )
 
             sim_df.to_csv(run_dir / f"sim_{label}.csv", index=False)
@@ -294,6 +326,7 @@ def run_experiment(config_path: str) -> str:
             slippage_bps=slippage_bps,
             slippage_vol_k=slippage_vol_k,
             initial_equity=initial_equity,
+            execution_lag=execution_lag,
         )
         sim_oos_df, window_metrics_df, run_metrics = _call_with_costs_adapter(
             run_walkforward_oos, kwargs, costs
@@ -345,6 +378,7 @@ def run_experiment(config_path: str) -> str:
             slippage_bps=slippage_bps,
             slippage_vol_k=slippage_vol_k,
             initial_equity=initial_equity,
+            execution_lag=execution_lag,
         )
         sim_oos_df, window_metrics_df, preds_oos_df, signals_oos_df, run_metrics = _call_with_costs_adapter(
             run_walkforward_ml_oos, kwargs, costs
@@ -402,6 +436,7 @@ def run_experiment(config_path: str) -> str:
             slippage_bps=slippage_bps,
             slippage_vol_k=slippage_vol_k,
             initial_equity=initial_equity,
+            execution_lag=execution_lag,
         )
         sim_oos_df, window_metrics_df, preds_oos_df, signals_oos_df, run_metrics = _call_with_costs_adapter(
             run_walkforward_ml_conformal_oos, kwargs, costs
@@ -459,6 +494,7 @@ def run_experiment(config_path: str) -> str:
             slippage_bps=slippage_bps,
             slippage_vol_k=slippage_vol_k,
             initial_equity=initial_equity,
+            execution_lag=execution_lag,
         )
         sim_oos_strat, window_metrics_strat, preds_oos, sig_oos, run_metrics_strat = _call_with_costs_adapter(
             run_walkforward_ml_conformal_oos, kwargs_strat, costs
@@ -486,6 +522,7 @@ def run_experiment(config_path: str) -> str:
             slippage_bps=slippage_bps,
             slippage_vol_k=slippage_vol_k,
             initial_equity=initial_equity,
+            execution_lag=execution_lag,
         )
         sim_oos_bh, _, bh_metrics = _call_with_costs_adapter(run_walkforward_oos, kwargs_bh, costs)
 
