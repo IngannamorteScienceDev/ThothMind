@@ -44,27 +44,30 @@ def run_multiticker_suite(cfg: dict[str, Any], run_dir: Path) -> pd.DataFrame:
     test_size = int(wf_cfg.get("test_size", 63))
     step = int(wf_cfg.get("step", 63))
 
-    cost_cfg = cfg.get("costs", {})
+    # --- Costs (NEW schema) ---
+    cost_cfg = cfg.get("costs", {}) or {}
     commission_bps = float(cost_cfg.get("commission_bps", 2.0))
-    slippage_k = float(cost_cfg.get("slippage_k", 0.15))
+    slippage_bps = float(cost_cfg.get("slippage_bps", 1.0))
+    slippage_vol_k = float(cost_cfg.get("slippage_vol_k", 10.0))
+
     initial_equity = float(cfg.get("sim", {}).get("initial_equity", 1.0))
 
-    model_cfg = cfg.get("model", {})
-    conformal_cfg = cfg.get("conformal", {"alpha": 0.10})
+    model_cfg = cfg.get("model", {}) or {}
+    conformal_cfg = cfg.get("conformal", {"alpha": 0.10}) or {"alpha": 0.10}
 
-    boot_cfg = cfg.get("bootstrap", {})
+    boot_cfg = cfg.get("bootstrap", {}) or {}
     n_boot = int(boot_cfg.get("n_boot", 2000))  # suite default (можно увеличить в конфиге)
     block_len = int(boot_cfg.get("block_len", 20))
     ci_alpha = float(boot_cfg.get("ci_alpha", 0.05))
     seed = int(boot_cfg.get("seed", int(cfg.get("run", {}).get("seed", 42))))
 
-    results = []
+    results: list[dict[str, Any]] = []
 
     for ticker in tickers:
         t_dir = tickers_root / ticker
         (t_dir / "plots").mkdir(parents=True, exist_ok=True)
 
-        row = {"ticker": ticker, "status": "ok", "error": ""}
+        row: dict[str, Any] = {"ticker": ticker, "status": "ok", "error": ""}
 
         try:
             # --- Build df_feat for this ticker ---
@@ -88,7 +91,7 @@ def run_multiticker_suite(cfg: dict[str, Any], run_dir: Path) -> pd.DataFrame:
             feature_cols = infer_feature_columns(df_feat)
             save_json({"feature_cols": feature_cols}, t_dir / "feature_cols.json")
 
-            # --- Strategy: conformal 90% WF OOS ---
+            # --- Strategy: conformal 90% WF OOS (NEW cost args) ---
             sim_oos_strat, window_metrics_strat, preds_oos, sigs_oos, run_metrics_strat = (
                 run_walkforward_ml_conformal_oos(
                     df_feat=df_feat,
@@ -97,7 +100,8 @@ def run_multiticker_suite(cfg: dict[str, Any], run_dir: Path) -> pd.DataFrame:
                     model_cfg=model_cfg,
                     conformal_cfg=conformal_cfg,
                     commission_bps=commission_bps,
-                    slippage_k=slippage_k,
+                    slippage_bps=slippage_bps,
+                    slippage_vol_k=slippage_vol_k,
                     initial_equity=initial_equity,
                 )
             )
@@ -111,7 +115,7 @@ def run_multiticker_suite(cfg: dict[str, Any], run_dir: Path) -> pd.DataFrame:
             plot_equity(sim_oos_strat, t_dir / "plots" / "wf_equity.png")
             plot_drawdown(sim_oos_strat, t_dir / "plots" / "wf_drawdown.png")
 
-            # --- Baseline: Buy&Hold under SAME WF protocol ---
+            # --- Baseline: Buy&Hold under SAME WF protocol (NEW cost args) ---
             bh_policy = BuyHoldPolicy()
             bh_signals_full = bh_policy.compute_signals(df_feat)
 
@@ -120,7 +124,8 @@ def run_multiticker_suite(cfg: dict[str, Any], run_dir: Path) -> pd.DataFrame:
                 signals_full=bh_signals_full,
                 splits=splits,
                 commission_bps=commission_bps,
-                slippage_k=slippage_k,
+                slippage_bps=slippage_bps,
+                slippage_vol_k=slippage_vol_k,
                 initial_equity=initial_equity,
             )
             sim_oos_bh.to_csv(t_dir / "sim_oos_buyhold.csv", index=False)
@@ -158,7 +163,7 @@ def run_multiticker_suite(cfg: dict[str, Any], run_dir: Path) -> pd.DataFrame:
             )
 
         except Exception as e:
-            row["status"] = "failed"
+            row["status"] = "error"
             row["error"] = repr(e)
 
         results.append(row)
