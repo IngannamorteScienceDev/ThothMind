@@ -1,4 +1,6 @@
 # thothmind/run.py
+from __future__ import annotations
+
 import argparse
 from typing import Any, Callable, Dict
 
