@@ -99,7 +99,32 @@ def run_walkforward_ml_conformal_oos(
         y_pred = model.predict(pred_span[feature_cols])
         y_lo, y_hi = conformal_interval(y_pred, qhat=qhat)
 
-        exp = conformal_to_exposure(y_pred=y_pred, y_lo=y_lo, y_hi=y_hi)
+        # --- Allocation (configurable) ---
+        alloc_cfg = (conformal_cfg or {})  # flat keys
+
+        low_exposure = float(alloc_cfg.get("low_exposure", 0.0))
+        mid_exposure = float(alloc_cfg.get("mid_exposure", 0.5))
+        high_exposure = float(alloc_cfg.get("high_exposure", 1.0))
+
+        y_pred_thr = float(alloc_cfg.get("y_pred_thr", 0.0))
+        width_max = alloc_cfg.get("width_max", None)
+        width_max = float(width_max) if width_max is not None else None
+
+        min_hold_days = int(alloc_cfg.get("min_hold_days", 0))
+
+        exp = conformal_to_exposure(
+            y_pred=y_pred,
+            y_lo=y_lo,
+            y_hi=y_hi,
+            low_exposure=low_exposure,
+            mid_exposure=mid_exposure,
+            high_exposure=high_exposure,
+            y_pred_thr=y_pred_thr,
+            width_max=width_max,
+            min_hold_days=min_hold_days,
+            clip_min=0.0,
+            clip_max=1.0,
+        )
 
         pred_span["y_pred"] = y_pred
         pred_span[f"y_lo_{cov}"] = y_lo
@@ -185,4 +210,12 @@ def run_walkforward_ml_conformal_oos(
     signals_oos_df = pd.concat(all_signals, ignore_index=True) if all_signals else pd.DataFrame()
 
     run_metrics = compute_metrics(sim_oos_df)
+    run_metrics["allocation"] = {
+        "low_exposure": float(low_exposure),
+        "mid_exposure": float(mid_exposure),
+        "high_exposure": float(high_exposure),
+        "y_pred_thr": float(y_pred_thr),
+        "width_max": None if width_max is None else float(width_max),
+        "min_hold_days": int(min_hold_days),
+    }
     return sim_oos_df, window_metrics_df, predictions_oos_df, signals_oos_df, run_metrics
