@@ -124,6 +124,11 @@ def _call_with_costs_adapter(func: Callable, kwargs: Dict[str, Any], costs: Dict
 def run_experiment(config_path: str) -> str:
     cfg = load_config(config_path)
 
+    # Rich logging
+    from thothmind.core.utils.richkit import console, setup_rich_logging
+
+    log = setup_rich_logging(cfg.get("run", {}).get("log_level", "INFO"))
+
     run_id = make_run_id(cfg)
     output_dir = cfg.get("run", {}).get("output_dir", "reports/runs")
     run_dir = init_run_dir(run_id, output_root=output_dir)
@@ -132,6 +137,9 @@ def run_experiment(config_path: str) -> str:
     write_run_artifacts(run_dir, cfg)
 
     stage = cfg.get("pipeline", {}).get("stage", "m0")
+
+    console.rule(f"[bold cyan]ThothMind[/] • stage={stage} • run_id={run_id}")
+    log.info(f"[ThothMind] artifacts -> {run_dir}")
 
     # Costs (supports old/new)
     costs = _read_costs(cfg)
@@ -149,19 +157,21 @@ def run_experiment(config_path: str) -> str:
         {"initial_equity": float(initial_equity), "execution_lag": int(execution_lag)},
         run_dir / "sim_config.json",
     )
+    log.info(f"[ThothMind] sim_config -> initial_equity={initial_equity}, execution_lag={execution_lag}")
 
     # Milestone 1/2/3/4/5/6/7 require a single df_feat
     df_feat = None
     if stage in ("m1", "m2", "m3", "m4", "m5", "m6", "m7", "all"):
         from thothmind.core.pipeline_m1 import build_df_feat
 
-        df_feat, snapshot = build_df_feat(cfg)
+        with console.status("[bold]Building features (df_feat)...[/]", spinner="dots"):
+            df_feat, snapshot = build_df_feat(cfg)
 
         df_feat.to_csv(run_dir / "df_feat.csv", index=False)
         save_json(snapshot, run_dir / "data_snapshot.json")
 
-        print(f"[ThothMind] saved df_feat.csv ({len(df_feat)} rows)")
-        print("[ThothMind] saved data_snapshot.json")
+        log.info(f"[ThothMind] saved df_feat.csv ({len(df_feat)} rows)")
+        log.info("[ThothMind] saved data_snapshot.json")
 
     # Milestone 2: baseline signals + simulator + metrics + plots
     if stage in ("m2", "all"):
@@ -175,28 +185,29 @@ def run_experiment(config_path: str) -> str:
         pol_cfg = cfg.get("baseline_policy", {}) or {}
         sma_window = int(pol_cfg.get("sma_window", 200))
 
-        policy = SMATrendPolicy(sma_window=sma_window)
-        signals_df = policy.compute_signals(df_feat)
+        with console.status(f"[bold]m2[/] baseline SMA({sma_window})...", spinner="dots"):
+            policy = SMATrendPolicy(sma_window=sma_window)
+            signals_df = policy.compute_signals(df_feat)
 
-        sim_df = _simulate_daily_adapter(
-            df_feat,
-            signals_df,
-            commission_bps=commission_bps,
-            slippage_bps=slippage_bps,
-            slippage_vol_k=slippage_vol_k,
-            slippage_k_legacy=slippage_k_legacy,
-            initial_equity=initial_equity,
-            execution_lag=execution_lag,
-        )
+            sim_df = _simulate_daily_adapter(
+                df_feat,
+                signals_df,
+                commission_bps=commission_bps,
+                slippage_bps=slippage_bps,
+                slippage_vol_k=slippage_vol_k,
+                slippage_k_legacy=slippage_k_legacy,
+                initial_equity=initial_equity,
+                execution_lag=execution_lag,
+            )
 
-        sim_df.to_csv(run_dir / "sim.csv", index=False)
-        metrics = compute_metrics(sim_df)
-        save_json(metrics, run_dir / "run_metrics.json")
+            sim_df.to_csv(run_dir / "sim.csv", index=False)
+            metrics = compute_metrics(sim_df)
+            save_json(metrics, run_dir / "run_metrics.json")
 
-        plot_equity(sim_df, run_dir / "plots" / "equity_curve.png")
-        plot_drawdown(sim_df, run_dir / "plots" / "drawdown.png")
+            plot_equity(sim_df, run_dir / "plots" / "equity_curve.png")
+            plot_drawdown(sim_df, run_dir / "plots" / "drawdown.png")
 
-        print("[ThothMind] saved sim.csv + run_metrics.json + plots/")
+        log.info("[ThothMind] saved sim.csv + run_metrics.json + plots/")
 
     # Milestone 3: baselines suite + sanity checks + multi-equity plot
     if stage in ("m3", "all"):
@@ -238,40 +249,41 @@ def run_experiment(config_path: str) -> str:
         equity_map = {}
         sanity_results = []
 
-        for label, policy in policies.items():
-            signals_df = policy.compute_signals(df_feat)
+        with console.status("[bold]m3[/] running baseline suite...", spinner="dots"):
+            for label, policy in policies.items():
+                signals_df = policy.compute_signals(df_feat)
 
-            sim_df = _simulate_daily_adapter(
-                df_feat,
-                signals_df,
-                commission_bps=commission_bps,
-                slippage_bps=slippage_bps,
-                slippage_vol_k=slippage_vol_k,
-                slippage_k_legacy=slippage_k_legacy,
-                initial_equity=initial_equity,
-                execution_lag=execution_lag,
-            )
+                sim_df = _simulate_daily_adapter(
+                    df_feat,
+                    signals_df,
+                    commission_bps=commission_bps,
+                    slippage_bps=slippage_bps,
+                    slippage_vol_k=slippage_vol_k,
+                    slippage_k_legacy=slippage_k_legacy,
+                    initial_equity=initial_equity,
+                    execution_lag=execution_lag,
+                )
 
-            sim_df.to_csv(run_dir / f"sim_{label}.csv", index=False)
-            metrics_all[label] = compute_metrics(sim_df)
+                sim_df.to_csv(run_dir / f"sim_{label}.csv", index=False)
+                metrics_all[label] = compute_metrics(sim_df)
 
-            if (
-                label in ("buyhold", "flat", f"sma_{sma_window}")
-                or label.startswith("random_01")
-                or label.startswith("random_s")
-            ):
-                equity_map[label] = sim_df
+                if (
+                    label in ("buyhold", "flat", f"sma_{sma_window}")
+                    or label.startswith("random_01")
+                    or label.startswith("random_s")
+                ):
+                    equity_map[label] = sim_df
 
-            if label == "buyhold":
-                sanity_results.append(sanity_buyhold_matches_theory(sim_df))
-            if label == "flat":
-                sanity_results.append(sanity_flat_has_no_pnl(sim_df))
+                if label == "buyhold":
+                    sanity_results.append(sanity_buyhold_matches_theory(sim_df))
+                if label == "flat":
+                    sanity_results.append(sanity_flat_has_no_pnl(sim_df))
 
-        save_json(metrics_all, run_dir / "baselines_metrics.json")
-        save_json(sanity_results, run_dir / "sanity_checks.json")
-        plot_multi_equity(equity_map, run_dir / "plots" / "baselines_equity.png")
+            save_json(metrics_all, run_dir / "baselines_metrics.json")
+            save_json(sanity_results, run_dir / "sanity_checks.json")
+            plot_multi_equity(equity_map, run_dir / "plots" / "baselines_equity.png")
 
-        print(
+        log.info(
             "[ThothMind] saved baselines sims + baselines_metrics.json + "
             "sanity_checks.json + baselines_equity.png"
         )
@@ -311,39 +323,40 @@ def run_experiment(config_path: str) -> str:
             sma_window = int(pol_cfg.get("sma_window", 200))
             policy = SMATrendPolicy(sma_window=sma_window)
 
-        signals_full = policy.compute_signals(df_feat)
+        with console.status("[bold]m4[/] walk-forward baseline...", spinner="dots"):
+            signals_full = policy.compute_signals(df_feat)
 
-        splits = generate_walkforward_splits(
-            n_rows=len(df_feat),
-            train_size=train_size,
-            test_size=test_size,
-            step=step,
-        )
+            splits = generate_walkforward_splits(
+                n_rows=len(df_feat),
+                train_size=train_size,
+                test_size=test_size,
+                step=step,
+            )
 
-        kwargs = dict(
-            df_feat=df_feat,
-            signals_full=signals_full,
-            splits=splits,
-            commission_bps=commission_bps,
-            slippage_bps=slippage_bps,
-            slippage_vol_k=slippage_vol_k,
-            initial_equity=initial_equity,
-            execution_lag=execution_lag,
-        )
-        sim_oos_df, window_metrics_df, run_metrics = _call_with_costs_adapter(
-            run_walkforward_oos, kwargs, costs
-        )
+            kwargs = dict(
+                df_feat=df_feat,
+                signals_full=signals_full,
+                splits=splits,
+                commission_bps=commission_bps,
+                slippage_bps=slippage_bps,
+                slippage_vol_k=slippage_vol_k,
+                initial_equity=initial_equity,
+                execution_lag=execution_lag,
+            )
+            sim_oos_df, window_metrics_df, run_metrics = _call_with_costs_adapter(
+                run_walkforward_oos, kwargs, costs
+            )
 
-        sim_oos_df.to_csv(run_dir / "sim_oos.csv", index=False)
-        window_metrics_df.to_csv(run_dir / "window_metrics.csv", index=False)
-        save_json(run_metrics, run_dir / "run_metrics.json")
+            sim_oos_df.to_csv(run_dir / "sim_oos.csv", index=False)
+            window_metrics_df.to_csv(run_dir / "window_metrics.csv", index=False)
+            save_json(run_metrics, run_dir / "run_metrics.json")
 
-        plot_equity(sim_oos_df, run_dir / "plots" / "wf_equity.png")
-        plot_drawdown(sim_oos_df, run_dir / "plots" / "wf_drawdown.png")
+            plot_equity(sim_oos_df, run_dir / "plots" / "wf_equity.png")
+            plot_drawdown(sim_oos_df, run_dir / "plots" / "wf_drawdown.png")
 
-        print("[ThothMind] saved sim_oos.csv + window_metrics.csv + wf plots")
+        log.info("[ThothMind] saved sim_oos.csv + window_metrics.csv + wf plots")
 
-    # Milestone 5: ML walk-forward (train->predict test) + decision layer (0/50/100)
+    # Milestone 5: ML walk-forward (train->predict test) + decision layer
     if stage in ("m5", "all"):
         from thothmind.core.features.pipeline import infer_feature_columns
         from thothmind.core.splits.walkforward import generate_walkforward_splits
@@ -353,55 +366,56 @@ def run_experiment(config_path: str) -> str:
         if df_feat is None:
             raise RuntimeError("df_feat is required for m5, but was not built.")
 
-        feature_cols = infer_feature_columns(df_feat)
+        with console.status("[bold]m5[/] ML walk-forward...", spinner="dots"):
+            feature_cols = infer_feature_columns(df_feat)
 
-        wf_cfg = cfg.get("walkforward", {}) or {}
-        train_size = int(wf_cfg.get("train_size", 756))
-        test_size = int(wf_cfg.get("test_size", 63))
-        step = int(wf_cfg.get("step", 63))
+            wf_cfg = cfg.get("walkforward", {}) or {}
+            train_size = int(wf_cfg.get("train_size", 756))
+            test_size = int(wf_cfg.get("test_size", 63))
+            step = int(wf_cfg.get("step", 63))
 
-        splits = generate_walkforward_splits(
-            n_rows=len(df_feat),
-            train_size=train_size,
-            test_size=test_size,
-            step=step,
-        )
+            splits = generate_walkforward_splits(
+                n_rows=len(df_feat),
+                train_size=train_size,
+                test_size=test_size,
+                step=step,
+            )
 
-        model_cfg = cfg.get("model", {}) or {}
-        decision_cfg = cfg.get("decision", {}) or {}
+            model_cfg = cfg.get("model", {}) or {}
+            decision_cfg = cfg.get("decision", {}) or {}
 
-        kwargs = dict(
-            df_feat=df_feat,
-            feature_cols=feature_cols,
-            splits=splits,
-            model_cfg=model_cfg,
-            decision_cfg=decision_cfg,
-            commission_bps=commission_bps,
-            slippage_bps=slippage_bps,
-            slippage_vol_k=slippage_vol_k,
-            initial_equity=initial_equity,
-            execution_lag=execution_lag,
-        )
-        sim_oos_df, window_metrics_df, preds_oos_df, signals_oos_df, run_metrics = _call_with_costs_adapter(
-            run_walkforward_ml_oos, kwargs, costs
-        )
+            kwargs = dict(
+                df_feat=df_feat,
+                feature_cols=feature_cols,
+                splits=splits,
+                model_cfg=model_cfg,
+                decision_cfg=decision_cfg,
+                commission_bps=commission_bps,
+                slippage_bps=slippage_bps,
+                slippage_vol_k=slippage_vol_k,
+                initial_equity=initial_equity,
+                execution_lag=execution_lag,
+            )
+            sim_oos_df, window_metrics_df, preds_oos_df, signals_oos_df, run_metrics = _call_with_costs_adapter(
+                run_walkforward_ml_oos, kwargs, costs
+            )
 
-        preds_oos_df.to_csv(run_dir / "predictions_oos.csv", index=False)
-        signals_oos_df.to_csv(run_dir / "signals_oos.csv", index=False)
-        sim_oos_df.to_csv(run_dir / "sim_oos.csv", index=False)
-        window_metrics_df.to_csv(run_dir / "window_metrics.csv", index=False)
-        save_json(run_metrics, run_dir / "run_metrics.json")
-        save_json({"feature_cols": feature_cols}, run_dir / "feature_cols.json")
+            preds_oos_df.to_csv(run_dir / "predictions_oos.csv", index=False)
+            signals_oos_df.to_csv(run_dir / "signals_oos.csv", index=False)
+            sim_oos_df.to_csv(run_dir / "sim_oos.csv", index=False)
+            window_metrics_df.to_csv(run_dir / "window_metrics.csv", index=False)
+            save_json(run_metrics, run_dir / "run_metrics.json")
+            save_json({"feature_cols": feature_cols}, run_dir / "feature_cols.json")
 
-        plot_equity(sim_oos_df, run_dir / "plots" / "wf_equity.png")
-        plot_drawdown(sim_oos_df, run_dir / "plots" / "wf_drawdown.png")
+            plot_equity(sim_oos_df, run_dir / "plots" / "wf_equity.png")
+            plot_drawdown(sim_oos_df, run_dir / "plots" / "wf_drawdown.png")
 
-        print(
+        log.info(
             "[ThothMind] saved predictions_oos.csv + signals_oos.csv + "
             "sim_oos.csv + window_metrics.csv + wf plots"
         )
 
-    # Milestone 6: ML walk-forward with conformal intervals (90%) + uncertainty gating
+    # Milestone 6: ML walk-forward with conformal intervals
     if stage in ("m6", "all"):
         from thothmind.core.features.pipeline import infer_feature_columns
         from thothmind.core.splits.walkforward import generate_walkforward_splits
@@ -411,50 +425,51 @@ def run_experiment(config_path: str) -> str:
         if df_feat is None:
             raise RuntimeError("df_feat is required for m6, but was not built.")
 
-        feature_cols = infer_feature_columns(df_feat)
+        with console.status("[bold]m6[/] conformal ML walk-forward...", spinner="dots"):
+            feature_cols = infer_feature_columns(df_feat)
 
-        wf_cfg = cfg.get("walkforward", {}) or {}
-        train_size = int(wf_cfg.get("train_size", 756))
-        test_size = int(wf_cfg.get("test_size", 63))
-        step = int(wf_cfg.get("step", 63))
+            wf_cfg = cfg.get("walkforward", {}) or {}
+            train_size = int(wf_cfg.get("train_size", 756))
+            test_size = int(wf_cfg.get("test_size", 63))
+            step = int(wf_cfg.get("step", 63))
 
-        splits = generate_walkforward_splits(
-            n_rows=len(df_feat),
-            train_size=train_size,
-            test_size=test_size,
-            step=step,
-        )
+            splits = generate_walkforward_splits(
+                n_rows=len(df_feat),
+                train_size=train_size,
+                test_size=test_size,
+                step=step,
+            )
 
-        model_cfg = cfg.get("model", {}) or {}
-        conformal_cfg = cfg.get("conformal", {"alpha": 0.10}) or {"alpha": 0.10}
+            model_cfg = cfg.get("model", {}) or {}
+            conformal_cfg = cfg.get("conformal", {"alpha": 0.10}) or {"alpha": 0.10}
 
-        kwargs = dict(
-            df_feat=df_feat,
-            feature_cols=feature_cols,
-            splits=splits,
-            model_cfg=model_cfg,
-            conformal_cfg=conformal_cfg,
-            commission_bps=commission_bps,
-            slippage_bps=slippage_bps,
-            slippage_vol_k=slippage_vol_k,
-            initial_equity=initial_equity,
-            execution_lag=execution_lag,
-        )
-        sim_oos_df, window_metrics_df, preds_oos_df, signals_oos_df, run_metrics = _call_with_costs_adapter(
-            run_walkforward_ml_conformal_oos, kwargs, costs
-        )
+            kwargs = dict(
+                df_feat=df_feat,
+                feature_cols=feature_cols,
+                splits=splits,
+                model_cfg=model_cfg,
+                conformal_cfg=conformal_cfg,
+                commission_bps=commission_bps,
+                slippage_bps=slippage_bps,
+                slippage_vol_k=slippage_vol_k,
+                initial_equity=initial_equity,
+                execution_lag=execution_lag,
+            )
+            sim_oos_df, window_metrics_df, preds_oos_df, signals_oos_df, run_metrics = _call_with_costs_adapter(
+                run_walkforward_ml_conformal_oos, kwargs, costs
+            )
 
-        preds_oos_df.to_csv(run_dir / "predictions_oos.csv", index=False)
-        signals_oos_df.to_csv(run_dir / "signals_oos.csv", index=False)
-        sim_oos_df.to_csv(run_dir / "sim_oos.csv", index=False)
-        window_metrics_df.to_csv(run_dir / "window_metrics.csv", index=False)
-        save_json(run_metrics, run_dir / "run_metrics.json")
-        save_json({"feature_cols": feature_cols}, run_dir / "feature_cols.json")
+            preds_oos_df.to_csv(run_dir / "predictions_oos.csv", index=False)
+            signals_oos_df.to_csv(run_dir / "signals_oos.csv", index=False)
+            sim_oos_df.to_csv(run_dir / "sim_oos.csv", index=False)
+            window_metrics_df.to_csv(run_dir / "window_metrics.csv", index=False)
+            save_json(run_metrics, run_dir / "run_metrics.json")
+            save_json({"feature_cols": feature_cols}, run_dir / "feature_cols.json")
 
-        plot_equity(sim_oos_df, run_dir / "plots" / "wf_equity.png")
-        plot_drawdown(sim_oos_df, run_dir / "plots" / "wf_drawdown.png")
+            plot_equity(sim_oos_df, run_dir / "plots" / "wf_equity.png")
+            plot_drawdown(sim_oos_df, run_dir / "plots" / "wf_drawdown.png")
 
-        print("[ThothMind] saved conformal predictions + signals + OOS sim + window metrics + wf plots")
+        log.info("[ThothMind] saved conformal predictions + signals + OOS sim + window metrics + wf plots")
 
     # Milestone 7: Bootstrap significance on OOS outperformance (strategy vs buy&hold)
     if stage in ("m7", "all"):
@@ -469,105 +484,106 @@ def run_experiment(config_path: str) -> str:
         if df_feat is None:
             raise RuntimeError("df_feat is required for m7, but was not built.")
 
-        feature_cols = infer_feature_columns(df_feat)
+        with console.status("[bold]m7[/] strategy OOS + bootstrap vs buy&hold...", spinner="dots"):
+            feature_cols = infer_feature_columns(df_feat)
 
-        wf_cfg = cfg.get("walkforward", {}) or {}
-        train_size = int(wf_cfg.get("train_size", 756))
-        test_size = int(wf_cfg.get("test_size", 63))
-        step = int(wf_cfg.get("step", 63))
+            wf_cfg = cfg.get("walkforward", {}) or {}
+            train_size = int(wf_cfg.get("train_size", 756))
+            test_size = int(wf_cfg.get("test_size", 63))
+            step = int(wf_cfg.get("step", 63))
 
-        splits = generate_walkforward_splits(
-            n_rows=len(df_feat),
-            train_size=train_size,
-            test_size=test_size,
-            step=step,
-        )
+            splits = generate_walkforward_splits(
+                n_rows=len(df_feat),
+                train_size=train_size,
+                test_size=test_size,
+                step=step,
+            )
 
-        model_cfg = cfg.get("model", {}) or {}
-        conformal_cfg = cfg.get("conformal", {"alpha": 0.10}) or {"alpha": 0.10}
+            model_cfg = cfg.get("model", {}) or {}
+            conformal_cfg = cfg.get("conformal", {"alpha": 0.10}) or {"alpha": 0.10}
 
-        kwargs_strat = dict(
-            df_feat=df_feat,
-            feature_cols=feature_cols,
-            splits=splits,
-            model_cfg=model_cfg,
-            conformal_cfg=conformal_cfg,
-            commission_bps=commission_bps,
-            slippage_bps=slippage_bps,
-            slippage_vol_k=slippage_vol_k,
-            initial_equity=initial_equity,
-            execution_lag=execution_lag,
-        )
-        sim_oos_strat, window_metrics_strat, preds_oos, sig_oos, run_metrics_strat = _call_with_costs_adapter(
-            run_walkforward_ml_conformal_oos, kwargs_strat, costs
-        )
+            kwargs_strat = dict(
+                df_feat=df_feat,
+                feature_cols=feature_cols,
+                splits=splits,
+                model_cfg=model_cfg,
+                conformal_cfg=conformal_cfg,
+                commission_bps=commission_bps,
+                slippage_bps=slippage_bps,
+                slippage_vol_k=slippage_vol_k,
+                initial_equity=initial_equity,
+                execution_lag=execution_lag,
+            )
+            sim_oos_strat, window_metrics_strat, preds_oos, sig_oos, run_metrics_strat = _call_with_costs_adapter(
+                run_walkforward_ml_conformal_oos, kwargs_strat, costs
+            )
 
-        preds_oos.to_csv(run_dir / "predictions_oos.csv", index=False)
-        sig_oos.to_csv(run_dir / "signals_oos.csv", index=False)
-        sim_oos_strat.to_csv(run_dir / "sim_oos.csv", index=False)
-        window_metrics_strat.to_csv(run_dir / "window_metrics.csv", index=False)
-        save_json(run_metrics_strat, run_dir / "run_metrics.json")
-        save_json({"feature_cols": feature_cols}, run_dir / "feature_cols.json")
+            preds_oos.to_csv(run_dir / "predictions_oos.csv", index=False)
+            sig_oos.to_csv(run_dir / "signals_oos.csv", index=False)
+            sim_oos_strat.to_csv(run_dir / "sim_oos.csv", index=False)
+            window_metrics_strat.to_csv(run_dir / "window_metrics.csv", index=False)
+            save_json(run_metrics_strat, run_dir / "run_metrics.json")
+            save_json({"feature_cols": feature_cols}, run_dir / "feature_cols.json")
 
-        plot_equity(sim_oos_strat, run_dir / "plots" / "wf_equity.png")
-        plot_drawdown(sim_oos_strat, run_dir / "plots" / "wf_drawdown.png")
+            plot_equity(sim_oos_strat, run_dir / "plots" / "wf_equity.png")
+            plot_drawdown(sim_oos_strat, run_dir / "plots" / "wf_drawdown.png")
 
-        # Buy&Hold baseline under SAME WF protocol
-        bh_policy = BuyHoldPolicy()
-        bh_signals_full = bh_policy.compute_signals(df_feat)
+            # Buy&Hold baseline under SAME WF protocol
+            bh_policy = BuyHoldPolicy()
+            bh_signals_full = bh_policy.compute_signals(df_feat)
 
-        kwargs_bh = dict(
-            df_feat=df_feat,
-            signals_full=bh_signals_full,
-            splits=splits,
-            commission_bps=commission_bps,
-            slippage_bps=slippage_bps,
-            slippage_vol_k=slippage_vol_k,
-            initial_equity=initial_equity,
-            execution_lag=execution_lag,
-        )
-        sim_oos_bh, _, bh_metrics = _call_with_costs_adapter(run_walkforward_oos, kwargs_bh, costs)
+            kwargs_bh = dict(
+                df_feat=df_feat,
+                signals_full=bh_signals_full,
+                splits=splits,
+                commission_bps=commission_bps,
+                slippage_bps=slippage_bps,
+                slippage_vol_k=slippage_vol_k,
+                initial_equity=initial_equity,
+                execution_lag=execution_lag,
+            )
+            sim_oos_bh, _, bh_metrics = _call_with_costs_adapter(run_walkforward_oos, kwargs_bh, costs)
 
-        sim_oos_bh.to_csv(run_dir / "sim_oos_buyhold.csv", index=False)
-        save_json(bh_metrics, run_dir / "run_metrics_buyhold.json")
+            sim_oos_bh.to_csv(run_dir / "sim_oos_buyhold.csv", index=False)
+            save_json(bh_metrics, run_dir / "run_metrics_buyhold.json")
 
-        boot_cfg = cfg.get("bootstrap", {}) or {}
-        n_boot = int(boot_cfg.get("n_boot", 5000))
-        block_len = int(boot_cfg.get("block_len", 20))
-        ci_alpha = float(boot_cfg.get("ci_alpha", 0.05))
-        seed = int(boot_cfg.get("seed", int(cfg.get("run", {}).get("seed", 42))))
+            boot_cfg = cfg.get("bootstrap", {}) or {}
+            n_boot = int(boot_cfg.get("n_boot", 5000))
+            block_len = int(boot_cfg.get("block_len", 20))
+            ci_alpha = float(boot_cfg.get("ci_alpha", 0.05))
+            seed = int(boot_cfg.get("seed", int(cfg.get("run", {}).get("seed", 42))))
 
-        sig_summary, boot_df = bootstrap_oos_outperformance(
-            sim_strategy=sim_oos_strat,
-            sim_buyhold=sim_oos_bh,
-            n_boot=n_boot,
-            block_len=block_len,
-            ci_alpha=ci_alpha,
-            seed=seed,
-        )
+            sig_summary, boot_df = bootstrap_oos_outperformance(
+                sim_strategy=sim_oos_strat,
+                sim_buyhold=sim_oos_bh,
+                n_boot=n_boot,
+                block_len=block_len,
+                ci_alpha=ci_alpha,
+                seed=seed,
+            )
 
-        save_json(sig_summary, run_dir / "oos_significance.json")
-        boot_df.to_csv(run_dir / "bootstrap_samples.csv", index=False)
+            save_json(sig_summary, run_dir / "oos_significance.json")
+            boot_df.to_csv(run_dir / "bootstrap_samples.csv", index=False)
 
-        plot_bootstrap_distribution(
-            values=boot_df["boot_rel_return"].to_numpy(),
-            actual_value=float(sig_summary["actual_rel_return"]),
-            out_path=run_dir / "plots" / "bootstrap_rel_return_hist.png",
-            title="Bootstrap OOS Outperformance vs Buy&Hold (Relative Return)",
-        )
+            plot_bootstrap_distribution(
+                values=boot_df["boot_rel_return"].to_numpy(),
+                actual_value=float(sig_summary["actual_rel_return"]),
+                out_path=run_dir / "plots" / "bootstrap_rel_return_hist.png",
+                title="Bootstrap OOS Outperformance vs Buy&Hold (Relative Return)",
+            )
 
-        print("[ThothMind] saved oos_significance.json + bootstrap_samples.csv + sim_oos_buyhold.csv + bootstrap plot")
+        log.info("[ThothMind] saved oos_significance.json + bootstrap_samples.csv + sim_oos_buyhold.csv + bootstrap plot")
 
     # Milestone 8: Multi-ticker OOS suite
     if stage in ("m8", "all"):
         from thothmind.core.suite.multiticker import run_multiticker_suite
 
         summary_df = run_multiticker_suite(cfg, run_dir)
-        print(f"[ThothMind] saved suite_summary.csv for {len(summary_df)} tickers")
-        print("[ThothMind] artifacts ->", run_dir / "tickers")
+        log.info(f"[ThothMind] saved suite_summary.csv for {len(summary_df)} tickers")
+        log.info(f"[ThothMind] artifacts -> {run_dir / 'tickers'}")
 
-    print(f"[ThothMind] run_id = {run_id}")
-    print(f"[ThothMind] artifacts -> {run_dir}")
+    log.info(f"[ThothMind] run_id = {run_id}")
+    log.info(f"[ThothMind] artifacts -> {run_dir}")
     return run_id
 
 
