@@ -29,8 +29,10 @@ def _plot_bar(df: pd.DataFrame, col: str, out_path: Path, title: str, ylabel: st
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     d = df.sort_values("regime").copy()
+    y = pd.to_numeric(d[col], errors="coerce").fillna(0.0)
+
     plt.figure()
-    plt.bar(d["regime"].astype(str), pd.to_numeric(d[col], errors="coerce").fillna(0.0))
+    plt.bar(d["regime"].astype(str), y)
     plt.xticks(rotation=45, ha="right")
     plt.title(title)
     plt.xlabel("regime")
@@ -44,7 +46,8 @@ def build_suite_regime_summary(
     tickers_dir: Path,
     out_dir: Path,
 ) -> pd.DataFrame:
-    """Aggregate per-ticker regime attribution reports into a suite-level summary.
+    """
+    Aggregate per-ticker regime attribution reports into a suite-level summary.
 
     Expects per-ticker files:
       tickers/<TICKER>/regime/regime_summary_wide.csv
@@ -87,6 +90,7 @@ def build_suite_regime_summary(
 
     allw = pd.concat(rows, ignore_index=True)
 
+    # Keep only what we need
     keep = ["ticker", "regime"]
     if "n_days_strategy" in allw.columns:
         keep.append("n_days_strategy")
@@ -101,34 +105,48 @@ def build_suite_regime_summary(
     else:
         allw["weight"] = 1.0
 
-    def _wmean(s: pd.Series, w: pd.Series) -> float:
-        s = pd.to_numeric(s, errors="coerce")
-        w = pd.to_numeric(w, errors="coerce").fillna(0.0)
-        m = np.isfinite(s.to_numpy()) & np.isfinite(w.to_numpy()) & (w.to_numpy() > 0)
-        if not m.any():
-            return float("nan")
-        return float(np.average(s.to_numpy()[m], weights=w.to_numpy()[m]))
+    # Regime index
+    regimes = sorted(allw["regime"].astype(str).unique())
+    out = pd.DataFrame({"regime": regimes}).set_index("regime")
 
-    def _share_pos(s: pd.Series) -> float:
-        s = pd.to_numeric(s, errors="coerce").dropna()
-        if s.empty:
-            return float("nan")
-        return float((s > 0).mean())
+    # n_tickers and weights
+    out["n_tickers"] = allw.groupby("regime")["ticker"].nunique().reindex(regimes).fillna(0).astype(int)
+    out["total_weight_days"] = allw.groupby("regime")["weight"].sum().reindex(regimes).fillna(0.0).astype(float)
 
-    grp = allw.groupby("regime", dropna=False)
+    def _share_pos(series: pd.Series, regime_series: pd.Series) -> pd.Series:
+        x = pd.to_numeric(series, errors="coerce")
+        m = x.notna()
+        pos = (x > 0) & m
+        npos = pos.groupby(regime_series).sum()
+        nobs = m.groupby(regime_series).sum()
+        return (npos / nobs).reindex(regimes)
 
-    out = pd.DataFrame({"regime": grp.size().index, "n_tickers": grp.size().values})
-    out["total_weight_days"] = grp["weight"].sum().values
-
+    # Aggregate each delta column without groupby.apply (no FutureWarning)
     for col in DELTA_COLS:
         if col not in allw.columns:
             continue
-        out[f"{col}_mean"] = grp[col].mean().values
-        out[f"{col}_median"] = grp[col].median().values
-        out[f"{col}_wmean"] = grp.apply(lambda g: _wmean(g[col], g["weight"])).values
-        out[f"{col}_share_pos"] = grp[col].apply(_share_pos).values
 
-    out = out.sort_values("regime").reset_index(drop=True)
+        x = pd.to_numeric(allw[col], errors="coerce")
+        g = allw["regime"].astype(str)
+        w = pd.to_numeric(allw["weight"], errors="coerce").fillna(0.0)
+
+        # simple mean/median (pandas ignores NaN)
+        out[f"{col}_mean"] = x.groupby(g).mean().reindex(regimes)
+        out[f"{col}_median"] = x.groupby(g).median().reindex(regimes)
+
+        # weighted mean: sum(w*x) / sum(w), with NaN-safe masking
+        m = x.notna() & (w > 0)
+        w_eff = w.where(m, 0.0)
+        wx = (x.fillna(0.0) * w_eff)
+
+        wsum = w_eff.groupby(g).sum().reindex(regimes)
+        wsumx = wx.groupby(g).sum().reindex(regimes)
+        out[f"{col}_wmean"] = np.where((wsum.to_numpy() > 0), (wsumx.to_numpy() / wsum.to_numpy()), np.nan)
+
+        # share of tickers/days with positive delta (NaN-safe)
+        out[f"{col}_share_pos"] = _share_pos(x, g)
+
+    out = out.reset_index().sort_values("regime").reset_index(drop=True)
     out.to_csv(out_dir / "suite_regime_summary.csv", index=False)
 
     # plots: prefer weighted mean for stability
