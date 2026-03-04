@@ -67,4 +67,5 @@ def make_progress() -> Progress:
         TimeRemainingColumn(),
         console=console,
         transient=False,
+        auto_refresh=False,
     )
