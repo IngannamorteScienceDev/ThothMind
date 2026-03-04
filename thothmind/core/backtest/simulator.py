@@ -5,10 +5,31 @@ import pandas as pd
 
 
 def _pick_return_column(df: pd.DataFrame) -> str:
-    for c in ["y", "ret", "return", "r"]:
+    """
+    Pick the *realized daily return* column for simulation.
+
+    Critical rule:
+      - Simulation must use realized 1D return (e.g., ret_1d).
+      - 'y' is a forward-looking ML target and MUST NOT be used as daily realized return
+        when horizon > 1.
+
+    Backward compatibility:
+      - If ret_1d is absent, fallback to ret/return/r, and only then to y.
+    """
+    candidates = [
+        "ret_1d",
+        "ret1d",
+        "ret",
+        "return",
+        "r",
+        "y",  # last-resort fallback ONLY
+    ]
+    for c in candidates:
         if c in df.columns:
             return c
-    raise KeyError("No return column found. Expected one of: y, ret, return, r")
+    raise KeyError(
+        "No return column found. Expected one of: ret_1d, ret1d, ret, return, r (or legacy y as last resort)."
+    )
 
 
 def simulate_daily(
@@ -27,7 +48,7 @@ def simulate_daily(
     - Slippage:  turnover * ((slippage_bps + slippage_vol_k * vol_frac) / 10000)
 
       where vol_frac is daily volatility proxy in fraction:
-        vol_frac ≈ realized_vol (if provided, fraction) OR |return| (fraction)
+        vol_frac ≈ realized_vol (if provided, fraction) OR |ret_1d| (fraction)
 
     execution_lag:
       - 0: execute same day (exposure_t = target_exposure_t)
@@ -52,12 +73,12 @@ def simulate_daily(
     df = df.sort_values("date")
     df = pd.merge(df, sig, on="date", how="left")
 
-    # Target exposure is the "desired" exposure for that date (signal-time series)
+    # Desired exposure
     df["target_exposure"] = (
         df["target_exposure"].astype(float).ffill().fillna(0.0).clip(-1.0, 1.0)
     )
 
-    # Executed exposure: apply lag to avoid lookahead (signal at t -> execution at t+lag)
+    # Executed exposure (apply lag)
     if lag == 0:
         df["exposure"] = df["target_exposure"]
     else:
@@ -66,6 +87,7 @@ def simulate_daily(
     prev_exp = df["exposure"].shift(1).fillna(0.0)
     df["turnover"] = (df["exposure"] - prev_exp).abs()
 
+    # Realized daily return (must be ret_1d if present)
     r_col = _pick_return_column(df)
     r = df[r_col].astype(float).to_numpy()
 
