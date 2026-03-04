@@ -95,7 +95,8 @@ def _read_allocation_cfg(cfg: dict) -> dict | None:
 
 
 def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
-    """Milestone 8: multi-ticker suite.
+    """
+    Milestone 8: multi-ticker suite.
 
     For each ticker we run:
       - m1 (df_feat + snapshot)
@@ -107,7 +108,7 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
     Writes per-ticker artifacts into:
       reports/runs/<run_id>/tickers/<TICKER>/...
 
-    And a suite-level summary:
+    And suite-level artifacts:
       reports/runs/<run_id>/suite_summary.csv
       reports/runs/<run_id>/suite_regime/suite_regime_summary.csv + plots
     """
@@ -118,7 +119,6 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
     if not tickers:
         raise ValueError("suite.tickers is empty. Provide at least one ticker.")
 
-    # Optional: allow disabling regime report for debugging
     regime_report = bool(suite_cfg.get("regime_report", True))
 
     wf_cfg = cfg.get("walkforward", {}) or {}
@@ -154,7 +154,6 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
 
     with make_progress() as p:
         t_task = p.add_task("m8: tickers", total=len(tickers))
-        # steps per ticker: build, strategy, buyhold, regimes, bootstrap
         s_task = p.add_task("m8: step", total=5, visible=False)
 
         for ticker in tickers:
@@ -170,13 +169,13 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
             save_json(ticker_cfg, ticker_dir / "config_ticker.json")
 
             try:
-                # Step 1: build df_feat
+                # 1) df_feat
                 df_feat, snapshot = build_df_feat(ticker_cfg)
                 df_feat.to_csv(ticker_dir / "df_feat.csv", index=False)
                 save_json(snapshot, ticker_dir / "data_snapshot.json")
                 p.advance(s_task, 1)
 
-                # Prepare splits
+                # splits
                 feature_cols = infer_feature_columns(df_feat)
                 splits = generate_walkforward_splits(
                     n_rows=len(df_feat),
@@ -185,7 +184,7 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
                     step=step,
                 )
 
-                # Step 2: WF strategy
+                # 2) strategy
                 p.update(s_task, description=f"{ticker} • WF strategy")
                 sim_oos_strat, window_metrics_strat, preds_oos, sig_oos, run_metrics_strat = (
                     run_walkforward_ml_conformal_oos(
@@ -213,7 +212,7 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
                 plot_drawdown(sim_oos_strat, ticker_dir / "plots" / "wf_drawdown.png")
                 p.advance(s_task, 1)
 
-                # Step 3: WF buy&hold
+                # 3) buy&hold
                 p.update(s_task, description=f"{ticker} • WF buy&hold")
                 bh_policy = BuyHoldPolicy()
                 bh_signals_full = bh_policy.compute_signals(df_feat)
@@ -232,7 +231,7 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
                 save_json(bh_metrics, ticker_dir / "run_metrics_buyhold.json")
                 p.advance(s_task, 1)
 
-                # Step 4: regime attribution report (m9)
+                # 4) per-ticker regimes
                 p.update(s_task, description=f"{ticker} • regimes")
                 if regime_report:
                     build_regime_attribution_report(
@@ -243,7 +242,7 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
                     )
                 p.advance(s_task, 1)
 
-                # Step 5: bootstrap
+                # 5) bootstrap
                 p.update(s_task, description=f"{ticker} • bootstrap")
                 sig_summary, boot_df = bootstrap_oos_outperformance(
                     sim_strategy=sim_oos_strat,
@@ -310,28 +309,30 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
             p.update(s_task, visible=False)
             p.advance(t_task, 1)
 
-            summary_df = pd.DataFrame(summary_rows)
-            if not summary_df.empty and {"ticker", "status"}.issubset(summary_df.columns):
-                rank = {"ok": 0, "error": 1}
-                summary_df["_status_rank"] = summary_df["status"].map(rank).fillna(9)
-                summary_df = summary_df.sort_values(["_status_rank", "ticker"], ascending=[True, True]).drop(
-                    columns=["_status_rank"]
-                )
+    # --- Suite summary (after ALL tickers) ---
+    summary_df = pd.DataFrame(summary_rows)
+    if not summary_df.empty and {"ticker", "status"}.issubset(summary_df.columns):
+        rank = {"ok": 0, "error": 1}
+        summary_df["_status_rank"] = summary_df["status"].map(rank).fillna(9)
+        summary_df = summary_df.sort_values(["_status_rank", "ticker"], ascending=[True, True]).drop(
+            columns=["_status_rank"]
+        )
 
-            summary_df.to_csv(run_dir / "suite_summary.csv", index=False)
+    summary_df.to_csv(run_dir / "suite_summary.csv", index=False)
+    log.info(f"[m8] saved suite_summary.csv for {len(summary_df)} tickers")
 
-            # Suite-level regime aggregation (m9-suites): combine per-ticker regime reports
-            # into a single table + plots for easier interpretation on defense.
-            if regime_report:
-                try:
-                    suite_reg_dir = run_dir / "suite_regime"
-                    build_suite_regime_summary(tickers_dir=tickers_dir, out_dir=suite_reg_dir)
-                    log.info(f"[m8] saved suite regime summary -> {suite_reg_dir}")
-                except Exception as e:
-                    log.warning(f"[m8] suite regime aggregation failed: {e}")
+    # --- Suite regime aggregation (after ALL per-ticker regime reports exist) ---
+    if regime_report:
+        try:
+            suite_reg_dir = run_dir / "suite_regime"
+            build_suite_regime_summary(tickers_dir=tickers_dir, out_dir=suite_reg_dir)
+            log.info(f"[m8] saved suite regime summary -> {suite_reg_dir}")
+        except Exception as e:
+            log.warning(f"[m8] suite regime aggregation failed: {e}")
 
-            return summary_df
+    return summary_df
 
-        # Backward-compat re-export (older code might import bootstrap from this module)
-        def bootstrap_oos_outperformance_legacy(*args, **kwargs) -> Tuple[Dict[str, Any], pd.DataFrame]:
-            return bootstrap_oos_outperformance(*args, **kwargs)
+
+# Backward-compat re-export (older code might import bootstrap from this module)
+def bootstrap_oos_outperformance_legacy(*args, **kwargs) -> Tuple[Dict[str, Any], pd.DataFrame]:
+    return bootstrap_oos_outperformance(*args, **kwargs)
