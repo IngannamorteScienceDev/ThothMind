@@ -1,0 +1,37 @@
+pipeline:
+  stage: "m3"
+
+run:
+  name: "exp_m3_baselines_suite"
+  seed: 42
+  output_dir: "reports/runs"
+
+data:
+  base_path: "data"
+  ticker: "SPY"
+  start: "2015-01-01"
+  end: null
+
+features:
+  horizon: 1
+  sma_windows: [5, 20, 50, 200]
+  vol_windows: [10, 20, 60]
+  lags: [1, 5, 20]
+
+regimes:
+  vol_window: 20
+  vol_median_window: 252
+  trend_sma_window: 200
+
+baselines:
+  sma_window: 200
+  random_seed: 42
+  random_p_long: 0.5
+  random_n_runs: 20   # профессионально: распределение случайных траекторий
+
+costs:
+  commission_bps: 2.0
+  slippage_k: 0.15
+
+sim:
+  initial_equity: 1.0

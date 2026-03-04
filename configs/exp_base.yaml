@@ -1,0 +1,9 @@
+run:
+  name: "exp_base_platform_test"
+  seed: 42
+  output_dir: "reports/runs"
+
+data:
+  universe: ["SPY"]
+  start: "2015-01-01"
+  end: null

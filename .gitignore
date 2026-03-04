@@ -69,6 +69,4 @@ pip-delete-this-directory.txt
 .lab/
 
 # Exported environments
-*.yml
-*.yaml
 /reports
