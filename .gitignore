@@ -70,3 +70,16 @@ pip-delete-this-directory.txt
 
 # Exported environments
 /reports
+
+# ThothMind runtime outputs
+reports/
+artifacts/
+.cache/
+__pycache__/
+*.log
+
+# local ticker lists / big data
+data/tickers/
+data/**/*.txt
+data/**/*.csv
+data/**/*.parquet
