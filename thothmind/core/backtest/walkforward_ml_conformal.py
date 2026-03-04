@@ -21,6 +21,7 @@ def run_walkforward_ml_conformal_oos(
     slippage_vol_k: float,
     initial_equity: float = 1.0,
     execution_lag: int = 0,
+    allocation_cfg: dict | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
     """
     Walk-forward ML + split conformal intervals.
@@ -37,9 +38,25 @@ def run_walkforward_ml_conformal_oos(
     df_feat = df_feat.copy().sort_values("date").reset_index(drop=True)
     df_feat["date"] = pd.to_datetime(df_feat["date"])
 
-    alpha = float((conformal_cfg or {}).get("alpha", 0.10))
-    calib_size = int((conformal_cfg or {}).get("calib_size", 252))
-    min_calib = int((conformal_cfg or {}).get("min_calib", 126))
+    conformal_cfg = conformal_cfg or {}
+    alpha = float(conformal_cfg.get("alpha", 0.10))
+    calib_size = int(conformal_cfg.get("calib_size", 252))
+    min_calib = int(conformal_cfg.get("min_calib", 126))
+
+    # Allocation config is separated from conformal intervals (new schema).
+    # Backward compatibility: if allocation_cfg is None/empty, allow allocation keys inside conformal_cfg.
+    allocation_cfg = allocation_cfg or {}
+    alloc_cfg = allocation_cfg if len(allocation_cfg) > 0 else conformal_cfg
+
+    low_exposure = float(alloc_cfg.get("low_exposure", 0.0))
+    mid_exposure = float(alloc_cfg.get("mid_exposure", 0.5))
+    high_exposure = float(alloc_cfg.get("high_exposure", 1.0))
+
+    y_pred_thr = float(alloc_cfg.get("y_pred_thr", 0.0))
+    width_max = alloc_cfg.get("width_max", None)
+    width_max = float(width_max) if width_max is not None else None
+
+    min_hold_days = int(alloc_cfg.get("min_hold_days", 0))
 
     xgb_cfg = XGBConfig(
         n_estimators=int((model_cfg or {}).get("n_estimators", 600)),
@@ -100,18 +117,6 @@ def run_walkforward_ml_conformal_oos(
         y_lo, y_hi = conformal_interval(y_pred, qhat=qhat)
 
         # --- Allocation (configurable) ---
-        alloc_cfg = (conformal_cfg or {})  # flat keys
-
-        low_exposure = float(alloc_cfg.get("low_exposure", 0.0))
-        mid_exposure = float(alloc_cfg.get("mid_exposure", 0.5))
-        high_exposure = float(alloc_cfg.get("high_exposure", 1.0))
-
-        y_pred_thr = float(alloc_cfg.get("y_pred_thr", 0.0))
-        width_max = alloc_cfg.get("width_max", None)
-        width_max = float(width_max) if width_max is not None else None
-
-        min_hold_days = int(alloc_cfg.get("min_hold_days", 0))
-
         exp = conformal_to_exposure(
             y_pred=y_pred,
             y_lo=y_lo,

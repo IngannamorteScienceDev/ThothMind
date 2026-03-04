@@ -116,9 +116,39 @@ def _call_with_costs_adapter(func: Callable, kwargs: Dict[str, Any], costs: Dict
         kwargs2 = dict(kwargs)
         kwargs2.pop("slippage_bps", None)
         kwargs2.pop("slippage_vol_k", None)
+        # Optional new args that old functions may not accept
+        kwargs2.pop("allocation_cfg", None)
         if "slippage_k" not in kwargs2:
             kwargs2["slippage_k"] = costs["slippage_k_legacy"]
         return func(**kwargs2)
+
+
+def _read_allocation_cfg(cfg: Dict[str, Any]) -> Dict[str, Any] | None:
+    """
+    Read allocation config (decision layer) from config.
+
+    New schema:
+      allocation:
+        low_exposure: ...
+        mid_exposure: ...
+        high_exposure: ...
+        min_hold_days: ...
+
+    Backward compatibility:
+      allow these keys to live under conformal: (older configs)
+    """
+    allocation_cfg = cfg.get("allocation")
+    if isinstance(allocation_cfg, dict) and len(allocation_cfg) > 0:
+        return allocation_cfg
+
+    conformal_cfg = cfg.get("conformal", {}) or {}
+    if not isinstance(conformal_cfg, dict):
+        return None
+
+    alloc_keys = {"low_exposure", "mid_exposure", "high_exposure", "y_pred_thr", "width_max", "min_hold_days"}
+    if any(k in conformal_cfg for k in alloc_keys):
+        return {k: conformal_cfg[k] for k in alloc_keys if k in conformal_cfg}
+    return None
 
 
 def run_experiment(config_path: str) -> str:
@@ -442,6 +472,7 @@ def run_experiment(config_path: str) -> str:
 
             model_cfg = cfg.get("model", {}) or {}
             conformal_cfg = cfg.get("conformal", {"alpha": 0.10}) or {"alpha": 0.10}
+            allocation_cfg = _read_allocation_cfg(cfg)
 
             kwargs = dict(
                 df_feat=df_feat,
@@ -449,6 +480,7 @@ def run_experiment(config_path: str) -> str:
                 splits=splits,
                 model_cfg=model_cfg,
                 conformal_cfg=conformal_cfg,
+                allocation_cfg=allocation_cfg,
                 commission_bps=commission_bps,
                 slippage_bps=slippage_bps,
                 slippage_vol_k=slippage_vol_k,
@@ -501,6 +533,7 @@ def run_experiment(config_path: str) -> str:
 
             model_cfg = cfg.get("model", {}) or {}
             conformal_cfg = cfg.get("conformal", {"alpha": 0.10}) or {"alpha": 0.10}
+            allocation_cfg = _read_allocation_cfg(cfg)
 
             kwargs_strat = dict(
                 df_feat=df_feat,
@@ -508,6 +541,7 @@ def run_experiment(config_path: str) -> str:
                 splits=splits,
                 model_cfg=model_cfg,
                 conformal_cfg=conformal_cfg,
+                allocation_cfg=allocation_cfg,
                 commission_bps=commission_bps,
                 slippage_bps=slippage_bps,
                 slippage_vol_k=slippage_vol_k,
