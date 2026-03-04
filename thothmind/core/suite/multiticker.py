@@ -20,6 +20,7 @@ from thothmind.core.reports.plots import (
     plot_equity,
 )
 from thothmind.core.reports.regime_attribution import build_regime_attribution_report
+from thothmind.core.reports.suite_regime import build_suite_regime_summary
 from thothmind.core.splits.walkforward import generate_walkforward_splits
 from thothmind.core.stats.significance import bootstrap_oos_outperformance
 from thothmind.core.utils.richkit import console, make_progress
@@ -108,10 +109,7 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
 
     And a suite-level summary:
       reports/runs/<run_id>/suite_summary.csv
-
-    Notes on console stability:
-      - Avoid nested Live renders (e.g., console.status inside Progress).
-      - Use Progress task descriptions instead.
+      reports/runs/<run_id>/suite_regime/suite_regime_summary.csv + plots
     """
     log = logging.getLogger("thothmind")
 
@@ -312,18 +310,28 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
             p.update(s_task, visible=False)
             p.advance(t_task, 1)
 
-    summary_df = pd.DataFrame(summary_rows)
-    if not summary_df.empty and {"ticker", "status"}.issubset(summary_df.columns):
-        rank = {"ok": 0, "error": 1}
-        summary_df["_status_rank"] = summary_df["status"].map(rank).fillna(9)
-        summary_df = summary_df.sort_values(["_status_rank", "ticker"], ascending=[True, True]).drop(
-            columns=["_status_rank"]
-        )
+            summary_df = pd.DataFrame(summary_rows)
+            if not summary_df.empty and {"ticker", "status"}.issubset(summary_df.columns):
+                rank = {"ok": 0, "error": 1}
+                summary_df["_status_rank"] = summary_df["status"].map(rank).fillna(9)
+                summary_df = summary_df.sort_values(["_status_rank", "ticker"], ascending=[True, True]).drop(
+                    columns=["_status_rank"]
+                )
 
-    summary_df.to_csv(run_dir / "suite_summary.csv", index=False)
-    return summary_df
+            summary_df.to_csv(run_dir / "suite_summary.csv", index=False)
 
+            # Suite-level regime aggregation (m9-suites): combine per-ticker regime reports
+            # into a single table + plots for easier interpretation on defense.
+            if regime_report:
+                try:
+                    suite_reg_dir = run_dir / "suite_regime"
+                    build_suite_regime_summary(tickers_dir=tickers_dir, out_dir=suite_reg_dir)
+                    log.info(f"[m8] saved suite regime summary -> {suite_reg_dir}")
+                except Exception as e:
+                    log.warning(f"[m8] suite regime aggregation failed: {e}")
 
-# Backward-compat re-export (older code might import bootstrap from this module)
-def bootstrap_oos_outperformance_legacy(*args, **kwargs) -> Tuple[Dict[str, Any], pd.DataFrame]:
-    return bootstrap_oos_outperformance(*args, **kwargs)
+            return summary_df
+
+        # Backward-compat re-export (older code might import bootstrap from this module)
+        def bootstrap_oos_outperformance_legacy(*args, **kwargs) -> Tuple[Dict[str, Any], pd.DataFrame]:
+            return bootstrap_oos_outperformance(*args, **kwargs)
