@@ -93,8 +93,7 @@ def _read_allocation_cfg(cfg: dict) -> dict | None:
 
 
 def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
-    """
-    Milestone 8: multi-ticker suite.
+    """Milestone 8: multi-ticker suite.
 
     For each ticker we run:
       - m1 (df_feat + snapshot)
@@ -107,6 +106,10 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
 
     And a suite-level summary:
       reports/runs/<run_id>/suite_summary.csv
+
+    Notes on console stability:
+      - Avoid nested Live renders (e.g., console.status inside Progress).
+      - Use Progress task descriptions instead.
     """
     log = logging.getLogger("thothmind")
 
@@ -148,9 +151,12 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
 
     with make_progress() as p:
         t_task = p.add_task("m8: tickers", total=len(tickers))
+        s_task = p.add_task("m8: step", total=4, visible=False)
 
         for ticker in tickers:
             p.update(t_task, description=f"m8: {ticker}")
+            p.update(s_task, completed=0, total=4, visible=True, description=f"{ticker} • build_df_feat")
+
             ticker_dir = tickers_dir / str(ticker)
             (ticker_dir / "plots").mkdir(parents=True, exist_ok=True)
 
@@ -160,11 +166,13 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
             save_json(ticker_cfg, ticker_dir / "config_ticker.json")
 
             try:
-                with console.status(f"[bold]{ticker}[/] build_df_feat", spinner="dots"):
-                    df_feat, snapshot = build_df_feat(ticker_cfg)
+                # Step 1: build df_feat
+                df_feat, snapshot = build_df_feat(ticker_cfg)
                 df_feat.to_csv(ticker_dir / "df_feat.csv", index=False)
                 save_json(snapshot, ticker_dir / "data_snapshot.json")
+                p.advance(s_task, 1)
 
+                # Prepare splits
                 feature_cols = infer_feature_columns(df_feat)
                 splits = generate_walkforward_splits(
                     n_rows=len(df_feat),
@@ -173,22 +181,23 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
                     step=step,
                 )
 
-                with console.status(f"[bold]{ticker}[/] WF strategy", spinner="dots"):
-                    sim_oos_strat, window_metrics_strat, preds_oos, sig_oos, run_metrics_strat = (
-                        run_walkforward_ml_conformal_oos(
-                            df_feat=df_feat,
-                            feature_cols=feature_cols,
-                            splits=splits,
-                            model_cfg=model_cfg,
-                            conformal_cfg=conformal_cfg,
-                            allocation_cfg=allocation_cfg,
-                            commission_bps=commission_bps,
-                            slippage_bps=slippage_bps,
-                            slippage_vol_k=slippage_vol_k,
-                            initial_equity=initial_equity,
-                            execution_lag=execution_lag,
-                        )
+                # Step 2: WF strategy
+                p.update(s_task, description=f"{ticker} • WF strategy")
+                sim_oos_strat, window_metrics_strat, preds_oos, sig_oos, run_metrics_strat = (
+                    run_walkforward_ml_conformal_oos(
+                        df_feat=df_feat,
+                        feature_cols=feature_cols,
+                        splits=splits,
+                        model_cfg=model_cfg,
+                        conformal_cfg=conformal_cfg,
+                        allocation_cfg=allocation_cfg,
+                        commission_bps=commission_bps,
+                        slippage_bps=slippage_bps,
+                        slippage_vol_k=slippage_vol_k,
+                        initial_equity=initial_equity,
+                        execution_lag=execution_lag,
                     )
+                )
 
                 preds_oos.to_csv(ticker_dir / "predictions_oos.csv", index=False)
                 sig_oos.to_csv(ticker_dir / "signals_oos.csv", index=False)
@@ -198,34 +207,38 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
 
                 plot_equity(sim_oos_strat, ticker_dir / "plots" / "wf_equity.png")
                 plot_drawdown(sim_oos_strat, ticker_dir / "plots" / "wf_drawdown.png")
+                p.advance(s_task, 1)
 
-                with console.status(f"[bold]{ticker}[/] WF buy&hold", spinner="dots"):
-                    bh_policy = BuyHoldPolicy()
-                    bh_signals_full = bh_policy.compute_signals(df_feat)
-                    sim_oos_bh, _, bh_metrics = run_walkforward_oos(
-                        df_feat=df_feat,
-                        signals_full=bh_signals_full,
-                        splits=splits,
-                        commission_bps=commission_bps,
-                        slippage_bps=slippage_bps,
-                        slippage_vol_k=slippage_vol_k,
-                        initial_equity=initial_equity,
-                        execution_lag=execution_lag,
-                    )
+                # Step 3: WF buy&hold
+                p.update(s_task, description=f"{ticker} • WF buy&hold")
+                bh_policy = BuyHoldPolicy()
+                bh_signals_full = bh_policy.compute_signals(df_feat)
+                sim_oos_bh, _, bh_metrics = run_walkforward_oos(
+                    df_feat=df_feat,
+                    signals_full=bh_signals_full,
+                    splits=splits,
+                    commission_bps=commission_bps,
+                    slippage_bps=slippage_bps,
+                    slippage_vol_k=slippage_vol_k,
+                    initial_equity=initial_equity,
+                    execution_lag=execution_lag,
+                )
 
                 sim_oos_bh.to_csv(ticker_dir / "sim_oos_buyhold.csv", index=False)
                 save_json(bh_metrics, ticker_dir / "run_metrics_buyhold.json")
+                p.advance(s_task, 1)
 
-                with console.status(f"[bold]{ticker}[/] bootstrap", spinner="dots"):
-                    sig_summary, boot_df = bootstrap_oos_outperformance(
-                        sim_strategy=sim_oos_strat,
-                        sim_buyhold=sim_oos_bh,
-                        n_boot=n_boot,
-                        block_len=block_len,
-                        ci_alpha=ci_alpha,
-                        seed=seed,
-                        show_progress=show_bootstrap_progress,
-                    )
+                # Step 4: bootstrap
+                p.update(s_task, description=f"{ticker} • bootstrap")
+                sig_summary, boot_df = bootstrap_oos_outperformance(
+                    sim_strategy=sim_oos_strat,
+                    sim_buyhold=sim_oos_bh,
+                    n_boot=n_boot,
+                    block_len=block_len,
+                    ci_alpha=ci_alpha,
+                    seed=seed,
+                    show_progress=show_bootstrap_progress,
+                )
 
                 save_json(sig_summary, ticker_dir / "oos_significance.json")
                 boot_df.to_csv(ticker_dir / "bootstrap_samples.csv", index=False)
@@ -236,6 +249,7 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
                     out_path=ticker_dir / "plots" / "bootstrap_rel_return_hist.png",
                     title=f"{ticker}: Bootstrap OOS Outperformance vs Buy&Hold (Relative Return)",
                 )
+                p.advance(s_task, 1)
 
                 s_stats = _compute_sim_stats(sim_oos_strat)
                 b_stats = _compute_sim_stats(sim_oos_bh)
@@ -268,6 +282,7 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
                     "ci_rel_return_high": float(sig_summary.get("ci_rel_return_high", np.nan)),
                 }
                 summary_rows.append(row)
+
                 log.info(
                     f"[m8] {ticker}: done (rel_return={row['actual_rel_return']:.4f}, p={row['p_value_one_sided']:.4f})"
                 )
@@ -276,6 +291,8 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
                 console.print(f"[red]{ticker} failed:[/] {e}")
                 summary_rows.append({"ticker": str(ticker), "status": "error", "error": str(e)})
 
+            # hide step bar between tickers (clean output)
+            p.update(s_task, visible=False)
             p.advance(t_task, 1)
 
     summary_df = pd.DataFrame(summary_rows)
