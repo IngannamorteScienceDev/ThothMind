@@ -512,6 +512,7 @@ def run_experiment(config_path: str) -> str:
         from thothmind.core.backtest.baseline_policy import BuyHoldPolicy
         from thothmind.core.reports.plots import plot_equity, plot_drawdown, plot_bootstrap_distribution
         from thothmind.core.stats.significance import bootstrap_oos_outperformance
+        from thothmind.core.reports.regime_attribution import build_regime_attribution_report
 
         if df_feat is None:
             raise RuntimeError("df_feat is required for m7, but was not built.")
@@ -606,7 +607,18 @@ def run_experiment(config_path: str) -> str:
                 title="Bootstrap OOS Outperformance vs Buy&Hold (Relative Return)",
             )
 
+            # Milestone 9 (reporting): Regime attribution (strategy vs buy&hold) on OOS sample
+            # This is a key scientific deliverable: where the strategy helps/hurts by regime.
+            regime_dir = run_dir / "regime"
+            build_regime_attribution_report(
+                df_feat=df_feat,
+                sim_strategy=sim_oos_strat,
+                sim_buyhold=sim_oos_bh,
+                out_dir=regime_dir,
+            )
+
         log.info("[ThothMind] saved oos_significance.json + bootstrap_samples.csv + sim_oos_buyhold.csv + bootstrap plot")
+        log.info(f"[ThothMind] saved regime attribution report -> {run_dir / 'regime'}")
 
     # Milestone 8: Multi-ticker OOS suite
     if stage in ("m8", "all"):

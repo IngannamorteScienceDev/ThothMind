@@ -3,8 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict
 
+# --- Matplotlib backend safety ---
+# Prevent TkAgg-related crashes on Windows when running with Rich live rendering.
 import matplotlib
-matplotlib.use("Agg")
+
+try:
+    matplotlib.use("Agg")
+except Exception:
+    pass
+
 import matplotlib.pyplot as plt
 import pandas as pd
 

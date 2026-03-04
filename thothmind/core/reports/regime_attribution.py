@@ -5,8 +5,18 @@ from typing import Tuple
 
 import numpy as np
 import pandas as pd
+
+# --- Matplotlib backend safety ---
+# Windows + default TkAgg can crash with background refresh threads.
+# We explicitly force a non-interactive backend before importing pyplot.
 import matplotlib
-matplotlib.use("Agg")
+
+try:
+    matplotlib.use("Agg")
+except Exception:
+    # If backend is already set, ignore.
+    pass
+
 import matplotlib.pyplot as plt
 
 
@@ -85,7 +95,7 @@ def _add_drawdown(sim_df: pd.DataFrame) -> pd.DataFrame:
     df = sim_df.copy()
     if "equity" not in df.columns:
         raise KeyError("sim_df must contain 'equity'.")
-    eq = pd.to_numeric(df["equity"], errors="coerce").astype(float).fillna(method="ffill")
+    eq = pd.to_numeric(df["equity"], errors="coerce").astype(float).ffill()
     peak = np.maximum.accumulate(eq.to_numpy(dtype=float))
     peak = np.where(peak <= 0.0, 1.0, peak)
     dd = (eq.to_numpy(dtype=float) / peak) - 1.0
@@ -243,7 +253,7 @@ def build_regime_attribution_report(
       out_dir/regime_summary_wide.csv
       out_dir/exposure_distribution_strategy.csv
       out_dir/exposure_distribution_buyhold.csv
-      out_dir/plots/*.png
+      out_dir/*.png
 
     Returns:
       (summary_wide, summary_long)
@@ -251,6 +261,16 @@ def build_regime_attribution_report(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     regimes = label_regimes(df_feat)
+
+    # IMPORTANT (scientific correctness):
+    # Regime attribution should be computed on the evaluated sample (OOS period),
+    # not on the full df_feat range.
+    # We therefore filter regimes to dates present in either strategy or buy&hold sims.
+    s_dates = pd.to_datetime(sim_strategy.get("date"), errors="coerce")
+    b_dates = pd.to_datetime(sim_buyhold.get("date"), errors="coerce")
+    keep_dates = pd.Index(pd.concat([s_dates, b_dates], ignore_index=True).dropna().unique())
+    if len(keep_dates) > 0:
+        regimes = regimes[regimes["date"].isin(keep_dates)].copy()
     regimes.to_csv(out_dir / "regimes.csv", index=False)
 
     strat = _add_drawdown(sim_strategy)
@@ -290,11 +310,10 @@ def build_regime_attribution_report(
     if not exp_b.empty:
         exp_b.to_csv(out_dir / "exposure_distribution_buyhold.csv", index=False)
 
-    # plots
-    plots_dir = out_dir / "plots"
-    _plot_regime_counts(regimes, plots_dir / "regime_counts.png")
-    _plot_mean_net_ret(wide, plots_dir / "regime_mean_net_ret.png")
+    # plots (save directly into out_dir for predictable artifact paths)
+    _plot_regime_counts(regimes, out_dir / "regime_counts.png")
+    _plot_mean_net_ret(wide, out_dir / "regime_mean_net_ret.png")
     if "avg_exposure_strategy" in wide.columns:
-        _plot_avg_exposure(wide, plots_dir / "regime_avg_exposure_strategy.png")
+        _plot_avg_exposure(wide, out_dir / "regime_avg_exposure_strategy.png")
 
     return wide, long_df

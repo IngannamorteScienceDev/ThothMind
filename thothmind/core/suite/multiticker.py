@@ -19,6 +19,7 @@ from thothmind.core.reports.plots import (
     plot_drawdown,
     plot_equity,
 )
+from thothmind.core.reports.regime_attribution import build_regime_attribution_report
 from thothmind.core.splits.walkforward import generate_walkforward_splits
 from thothmind.core.stats.significance import bootstrap_oos_outperformance
 from thothmind.core.utils.richkit import console, make_progress
@@ -99,6 +100,7 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
       - m1 (df_feat + snapshot)
       - WF strategy (ML + conformal intervals + allocation)
       - WF buy&hold under same protocol
+      - Milestone 9 report: regime attribution by bull/bear × high/low vol
       - moving-block bootstrap significance (strategy vs buy&hold)
 
     Writes per-ticker artifacts into:
@@ -117,6 +119,9 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
     tickers = list(suite_cfg.get("tickers", []) or [])
     if not tickers:
         raise ValueError("suite.tickers is empty. Provide at least one ticker.")
+
+    # Optional: allow disabling regime report for debugging
+    regime_report = bool(suite_cfg.get("regime_report", True))
 
     wf_cfg = cfg.get("walkforward", {}) or {}
     train_size = int(wf_cfg.get("train_size", 756))
@@ -151,11 +156,12 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
 
     with make_progress() as p:
         t_task = p.add_task("m8: tickers", total=len(tickers))
-        s_task = p.add_task("m8: step", total=4, visible=False)
+        # steps per ticker: build, strategy, buyhold, regimes, bootstrap
+        s_task = p.add_task("m8: step", total=5, visible=False)
 
         for ticker in tickers:
             p.update(t_task, description=f"m8: {ticker}")
-            p.update(s_task, completed=0, total=4, visible=True, description=f"{ticker} • build_df_feat")
+            p.update(s_task, completed=0, total=5, visible=True, description=f"{ticker} • build_df_feat")
 
             ticker_dir = tickers_dir / str(ticker)
             (ticker_dir / "plots").mkdir(parents=True, exist_ok=True)
@@ -228,7 +234,18 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
                 save_json(bh_metrics, ticker_dir / "run_metrics_buyhold.json")
                 p.advance(s_task, 1)
 
-                # Step 4: bootstrap
+                # Step 4: regime attribution report (m9)
+                p.update(s_task, description=f"{ticker} • regimes")
+                if regime_report:
+                    build_regime_attribution_report(
+                        df_feat=df_feat,
+                        sim_strategy=sim_oos_strat,
+                        sim_buyhold=sim_oos_bh,
+                        out_dir=ticker_dir / "regime",
+                    )
+                p.advance(s_task, 1)
+
+                # Step 5: bootstrap
                 p.update(s_task, description=f"{ticker} • bootstrap")
                 sig_summary, boot_df = bootstrap_oos_outperformance(
                     sim_strategy=sim_oos_strat,
