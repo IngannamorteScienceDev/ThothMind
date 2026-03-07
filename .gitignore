@@ -49,12 +49,6 @@ Thumbs.db
 /models/*.pkl
 /models/*.joblib
 
-# Reports / outputs
-/reports/*.pdf
-/reports/*.png
-/reports/*.jpg
-/reports/*.html
-
 # Streamlit secrets
 .streamlit/secrets.toml
 
@@ -67,19 +61,3 @@ pip-delete-this-directory.txt
 
 # Jupyter lab state
 .lab/
-
-# Exported environments
-/reports
-
-# ThothMind runtime outputs
-reports/
-artifacts/
-.cache/
-__pycache__/
-*.log
-
-# local ticker lists / big data
-data/tickers/
-data/**/*.txt
-data/**/*.csv
-data/**/*.parquet
