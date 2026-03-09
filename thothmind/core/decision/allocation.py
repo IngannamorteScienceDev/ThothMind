@@ -59,11 +59,41 @@ def _cooldown_hold(exposure: np.ndarray, min_hold_days: int) -> np.ndarray:
         if x != last:
             last = x
             out[i] = last
-            cooldown = hold  # lock after switch
+            cooldown = hold
         else:
             out[i] = last
 
     return out
+
+
+def predictions_to_exposure(
+    y_pred: np.ndarray,
+    thr_half: float = 0.0,
+    thr_full: float = 0.001,
+    low_exposure: float = 0.0,
+    mid_exposure: float = 0.5,
+    high_exposure: float = 1.0,
+    min_hold_days: int = 0,
+    clip_min: float = 0.0,
+    clip_max: float = 1.0,
+) -> np.ndarray:
+    """
+    Map point predictions to long-only exposure.
+
+    Rules:
+      - y_pred <= thr_half          -> low_exposure
+      - thr_half < y_pred < thr_full -> mid_exposure
+      - y_pred >= thr_full          -> high_exposure
+    """
+    y_pred = np.asarray(y_pred, dtype=float)
+    exp = np.full_like(y_pred, fill_value=float(low_exposure), dtype=float)
+
+    exp[y_pred > float(thr_half)] = float(mid_exposure)
+    exp[y_pred >= float(thr_full)] = float(high_exposure)
+
+    exp = np.clip(exp, float(clip_min), float(clip_max))
+    exp = _cooldown_hold(exp, int(min_hold_days))
+    return exp
 
 
 def conformal_to_exposure(
@@ -107,15 +137,12 @@ def conformal_to_exposure(
 
     exp = np.full_like(y_pred, fill_value=low, dtype=float)
 
-    # confident negative -> low
     neg = y_hi < 0.0
     exp[neg] = low
 
-    # confident positive -> high
     pos = y_lo > 0.0
     exp[pos] = high
 
-    # uncertain: interval crosses 0
     cross = ~(neg | pos)
     if np.any(cross):
         ok_width = np.ones_like(y_pred, dtype=bool)
@@ -126,8 +153,6 @@ def conformal_to_exposure(
         exp[cross & weak_long] = mid
         exp[cross & ~weak_long] = low
 
-    # clamp + churn control
     exp = np.clip(exp, float(clip_min), float(clip_max))
     exp = _cooldown_hold(exp, int(min_hold_days))
-
     return exp

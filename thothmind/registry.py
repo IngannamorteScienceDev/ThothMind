@@ -6,10 +6,14 @@ from pathlib import Path
 from .config import save_json
 
 
+def compute_cfg_hash(cfg: dict) -> str:
+    cfg_bytes = json.dumps(cfg, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha1(cfg_bytes).hexdigest()[:12]
+
+
 def make_run_id(cfg: dict) -> str:
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    cfg_bytes = json.dumps(cfg, sort_keys=True, ensure_ascii=False).encode("utf-8")
-    h = hashlib.sha1(cfg_bytes).hexdigest()[:10]
+    h = compute_cfg_hash(cfg)[:10]
     return f"{ts}_{h}"
 
 
@@ -23,6 +27,7 @@ def write_run_artifacts(run_dir: Path, cfg: dict) -> None:
     manifest = {
         "run_id": run_dir.name,
         "created_utc": datetime.now(timezone.utc).isoformat(),
+        "cfg_hash": compute_cfg_hash(cfg),
     }
 
     save_json(cfg, run_dir / "config.json")

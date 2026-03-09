@@ -61,3 +61,6 @@ pip-delete-this-directory.txt
 
 # Jupyter lab state
 .lab/
+/reports
+/data_curated
+/configs/_batch_tmp

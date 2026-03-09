@@ -4,32 +4,14 @@ import numpy as np
 import pandas as pd
 
 
+RETURN_COL_CANDIDATES = ["ret_1d", "y", "ret", "return", "r"]
+
+
 def _pick_return_column(df: pd.DataFrame) -> str:
-    """
-    Pick the *realized daily return* column for simulation.
-
-    Critical rule:
-      - Simulation must use realized 1D return (e.g., ret_1d).
-      - 'y' is a forward-looking ML target and MUST NOT be used as daily realized return
-        when horizon > 1.
-
-    Backward compatibility:
-      - If ret_1d is absent, fallback to ret/return/r, and only then to y.
-    """
-    candidates = [
-        "ret_1d",
-        "ret1d",
-        "ret",
-        "return",
-        "r",
-        "y",  # last-resort fallback ONLY
-    ]
-    for c in candidates:
+    for c in RETURN_COL_CANDIDATES:
         if c in df.columns:
             return c
-    raise KeyError(
-        "No return column found. Expected one of: ret_1d, ret1d, ret, return, r (or legacy y as last resort)."
-    )
+    raise KeyError(f"No return column found. Expected one of: {RETURN_COL_CANDIDATES}")
 
 
 def simulate_daily(
@@ -42,13 +24,7 @@ def simulate_daily(
     execution_lag: int = 0,
 ) -> pd.DataFrame:
     """
-    Daily simulator with realistic costs:
-
-    - Commission: turnover * (commission_bps / 10000)
-    - Slippage:  turnover * ((slippage_bps + slippage_vol_k * vol_frac) / 10000)
-
-      where vol_frac is daily volatility proxy in fraction:
-        vol_frac ≈ realized_vol (if provided, fraction) OR |ret_1d| (fraction)
+    Daily simulator with realistic costs.
 
     execution_lag:
       - 0: execute same day (exposure_t = target_exposure_t)
@@ -73,12 +49,10 @@ def simulate_daily(
     df = df.sort_values("date")
     df = pd.merge(df, sig, on="date", how="left")
 
-    # Desired exposure
     df["target_exposure"] = (
         df["target_exposure"].astype(float).ffill().fillna(0.0).clip(-1.0, 1.0)
     )
 
-    # Executed exposure (apply lag)
     if lag == 0:
         df["exposure"] = df["target_exposure"]
     else:
@@ -87,27 +61,21 @@ def simulate_daily(
     prev_exp = df["exposure"].shift(1).fillna(0.0)
     df["turnover"] = (df["exposure"] - prev_exp).abs()
 
-    # Realized daily return (must be ret_1d if present)
     r_col = _pick_return_column(df)
     r = df[r_col].astype(float).to_numpy()
 
-    # Commission (bps)
     commission_rate = float(commission_bps) / 10000.0
     df["commission_cost"] = df["turnover"] * commission_rate
 
-    # Volatility proxy (fraction)
     if "realized_vol" in df.columns:
         vol = df["realized_vol"].astype(float).to_numpy()
         vol = np.where(np.isfinite(vol), vol, 0.0)
-        vol = np.clip(vol, 0.0, 1.0)  # daily vol above 100% makes no sense
+        vol = np.clip(vol, 0.0, 1.0)
         vol_frac = vol
     else:
         vol_frac = np.abs(r)
 
-    # Slippage (bps) scaled by volatility fraction
     slip_bps_eff = float(slippage_bps) + float(slippage_vol_k) * vol_frac
-
-    # Cap slippage in bps per turnover
     slip_bps_eff = np.clip(slip_bps_eff, 0.0, 50.0)
 
     df["slippage_cost"] = df["turnover"] * (slip_bps_eff / 10000.0)
@@ -128,9 +96,15 @@ def simulate_daily(
 
     df["pnl"] = pnl
     df["equity"] = equity
+    peak = df["equity"].cummax()
+    df["drawdown"] = df["equity"] / peak - 1.0
 
+    keep_optional = [
+        c for c in ["ticker", "ret_1d", "y", "realized_vol", "market_regime"] if c in df.columns
+    ]
     out_cols = [
         "date",
+        *keep_optional,
         "target_exposure",
         "exposure",
         "turnover",
@@ -141,8 +115,6 @@ def simulate_daily(
         "net_ret",
         "pnl",
         "equity",
+        "drawdown",
     ]
-    if "ticker" in df.columns:
-        out_cols.insert(1, "ticker")
-
     return df[out_cols].copy()
