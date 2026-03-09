@@ -20,19 +20,19 @@ class WalkforwardResult(dict):
     """
     Dict-like result that is also tuple-unpackable.
 
-    Expected unpack order for run.py:
-    predictions_oos, signals_oos, sim_oos, window_metrics, feature_cols
+    run.py expects unpack order:
+    sim_oos, window_metrics, predictions_oos, signals_oos, run_metrics
     """
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
     def __iter__(self):
-        yield self["predictions_oos"]
-        yield self["signals_oos"]
         yield self["sim_oos"]
         yield self["window_metrics"]
-        yield self["feature_cols"]
+        yield self["predictions_oos"]
+        yield self["signals_oos"]
+        yield self["run_metrics"]
 
 
 def _first_existing_col(df: pd.DataFrame, names: list[str]) -> str | None:
