@@ -21,7 +21,7 @@ class WalkforwardResult(dict):
     Dict-like result that is also tuple-unpackable.
 
     Expected unpack order for run.py:
-    predictions_oos, sim_oos, signals_oos, window_metrics, feature_cols
+    predictions_oos, signals_oos, sim_oos, window_metrics, feature_cols
     """
 
     def __init__(self, **kwargs):
@@ -29,8 +29,8 @@ class WalkforwardResult(dict):
 
     def __iter__(self):
         yield self["predictions_oos"]
-        yield self["sim_oos"]
         yield self["signals_oos"]
+        yield self["sim_oos"]
         yield self["window_metrics"]
         yield self["feature_cols"]
 
