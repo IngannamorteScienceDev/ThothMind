@@ -58,35 +58,6 @@ def resolve_return_col(df: pd.DataFrame) -> str:
 
 
 def resolve_trend_reference(df: pd.DataFrame, trend_sma_window: int) -> pd.Series:
-    """
-    Priority:
-    1) already prepared trend labels in dataset
-    2) ratio-to-SMA columns if available
-    3) fallback: close > SMA(window)
-    """
-    # 1) explicit trend label
-    trend_state_col = _first_existing_col(df, ["trend_state"])
-    if trend_state_col is not None:
-        s = df[trend_state_col].astype(str).str.lower().str.strip()
-        return s.isin({"bull", "up", "uptrend", "long", "positive"})
-
-    trend_regime_col = _first_existing_col(df, ["trend_regime"])
-    if trend_regime_col is not None:
-        s = df[trend_regime_col].astype(str).str.lower().str.strip()
-        return s.isin({"bull", "up", "uptrend", "long", "positive"})
-
-    market_regime_col = _first_existing_col(df, ["market_regime"])
-    if market_regime_col is not None:
-        s = df[market_regime_col].astype(str).str.lower().str.strip()
-        return s.str.contains("bull", na=False)
-
-    # 2) ratio-to-SMA feature
-    ratio_col = _first_existing_col(df, [f"sma_ratio_{trend_sma_window}", f"SMA_RATIO_{trend_sma_window}"])
-    if ratio_col is not None:
-        ratio = _coerce_numeric(df[ratio_col], fill=np.nan).fillna(0.0)
-        return ratio > 1.0
-
-    # 3) fallback to raw SMA
     close_col = resolve_close_col(df)
     candidates = [
         f"sma_{trend_sma_window}",
@@ -98,11 +69,11 @@ def resolve_trend_reference(df: pd.DataFrame, trend_sma_window: int) -> pd.Serie
 
     close = _coerce_numeric(df[close_col])
     if sma_col is not None:
-        sma = _coerce_numeric(df[sma_col], fill=np.nan)
+        sma = _coerce_numeric(df[sma_col])
     else:
         sma = close.rolling(trend_sma_window, min_periods=max(20, trend_sma_window // 4)).mean()
 
-    return (close > sma).fillna(False)
+    return close > sma
 
 
 def compute_dynamic_thresholds(
@@ -115,16 +86,16 @@ def compute_dynamic_thresholds(
     edge_buffer_bps: float = 5.0,
 ) -> tuple[float, float]:
     """
-    Dynamic thresholds from train-window predictions.
+    Build entry/exit thresholds from the train-window prediction distribution.
 
-    Kept conservative, but not degenerate.
+    Key idea:
+    - do not enter just because prediction > 0
+    - require forecasted edge to exceed costs + noise buffer
     """
     preds = pd.Series(np.asarray(train_predictions, dtype=float)).replace([np.inf, -np.inf], np.nan).dropna()
-
-    cost_floor = (commission_bps / 10_000.0) + max(0.0, slippage_k) * 0.0005 + edge_buffer_bps / 10_000.0
-
     if preds.empty:
-        return float(cost_floor), float(cost_floor * 0.35)
+        base = (commission_bps / 10_000.0) + max(0.0, slippage_k) * 0.0005 + edge_buffer_bps / 10_000.0
+        return float(base), float(base * 0.35)
 
     positive = preds[preds > 0]
     source = positive if not positive.empty else preds
@@ -132,33 +103,11 @@ def compute_dynamic_thresholds(
     q_enter = float(source.quantile(min(max(enter_quantile, 0.05), 0.95)))
     q_exit = float(source.quantile(min(max(exit_quantile, 0.05), 0.95)))
 
-    # keep threshold above costs, but avoid absurd inflation
+    cost_floor = (commission_bps / 10_000.0) + max(0.0, slippage_k) * 0.0005 + edge_buffer_bps / 10_000.0
     enter_thr = max(q_enter, cost_floor)
     exit_thr = max(min(q_exit, enter_thr * 0.75), cost_floor * 0.35)
 
     return float(enter_thr), float(exit_thr)
-
-
-def _interval_confidence(pred: pd.Series, lower: pd.Series | None, floor: float, cap: float) -> pd.Series:
-    """
-    Convert conformal interval into confidence score in [0, 1].
-
-    Logic:
-    - if no lower bound, confidence = 1
-    - if lower bound exists, wide/unsafe interval reduces confidence
-    - but confidence is only used AFTER entry condition passes
-    """
-    if lower is None:
-        return pd.Series(1.0, index=pred.index, dtype=float)
-
-    pred_pos = pred.clip(lower=0.0)
-    width = (pred - lower).clip(lower=0.0)
-
-    # narrower interval relative to point forecast => higher confidence
-    conf = pred_pos / (pred_pos + width + 1e-12)
-    conf = conf.replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    conf = conf.clip(lower=floor, upper=cap)
-    return conf.astype(float)
 
 
 def build_long_only_positions(
@@ -177,15 +126,16 @@ def build_long_only_positions(
     Build a long-only position path with:
 
     - dynamic entry threshold
-    - separate exit threshold (hysteresis)
+    - different exit threshold (hysteresis)
     - trend filter
     - optional regime blocklist
     - volatility targeting
     - execution lag
 
-    Critical fixes:
-    - desired_weight = 0 when entry condition is not met
-    - conformal lower bound is used for confidence sizing, not as hard entry gate
+    Important:
+    - decision_* columns describe MODEL DECISION on the current bar
+    - execution_* columns describe REAL EXECUTION after execution_lag
+    - signal is kept as a backward-compatible alias to execution_entry_signal
     """
     if policy is None:
         policy = PositionPolicyConfig()
@@ -199,18 +149,21 @@ def build_long_only_positions(
     close_col = resolve_close_col(out)
 
     pred = _coerce_numeric(out[prediction_col])
-    lower = _coerce_numeric(out[lower_bound_col], fill=np.nan) if lower_bound_col and lower_bound_col in out.columns else None
+    lower = (
+        _coerce_numeric(out[lower_bound_col], fill=np.nan)
+        if lower_bound_col and lower_bound_col in out.columns
+        else None
+    )
     daily_ret = _coerce_numeric(out[ret_col])
 
     trend_ok = (
         resolve_trend_reference(out, policy.trend_sma_window)
         if policy.use_trend_filter
         else pd.Series(True, index=out.index)
-    ).fillna(False)
+    )
 
     if regime_col in out.columns:
-        blockset = {str(x).lower().strip() for x in policy.block_regimes}
-        blocked = out[regime_col].astype(str).str.lower().str.strip().isin(blockset)
+        blocked = out[regime_col].astype(str).isin(set(policy.block_regimes))
     else:
         blocked = pd.Series(False, index=out.index)
 
@@ -218,7 +171,6 @@ def build_long_only_positions(
         policy.vol_lookback,
         min_periods=max(5, policy.vol_lookback // 3),
     ).std()
-
     annualized_vol = realized_vol * np.sqrt(252.0)
     vol_scale = (policy.vol_target_annual / annualized_vol.replace(0.0, np.nan)).clip(
         lower=policy.min_position,
@@ -226,27 +178,31 @@ def build_long_only_positions(
     )
     vol_scale = vol_scale.replace([np.inf, -np.inf], np.nan).fillna(policy.max_position)
 
-    # Entry/exit logic
-    point_entry_ok = pred > float(enter_threshold)
-    point_exit_ok = pred < float(exit_threshold)
-
-    interval_conf = _interval_confidence(
-        pred=pred,
-        lower=lower,
-        floor=float(policy.confidence_floor),
-        cap=float(policy.confidence_cap),
+    edge = pred - float(enter_threshold)
+    raw_conf = ((edge / max(float(enter_threshold), 1e-9)) + 1.0).clip(
+        lower=policy.confidence_floor,
+        upper=policy.confidence_cap,
     )
 
-    # Weight only when point forecast actually clears entry threshold
-    desired_weight = pd.Series(0.0, index=out.index, dtype=float)
-    desired_weight.loc[point_entry_ok] = (
-        interval_conf.loc[point_entry_ok] * vol_scale.loc[point_entry_ok]
-    ).clip(lower=policy.min_position, upper=policy.max_position)
+    desired_weight = (raw_conf * vol_scale).clip(
+        lower=policy.min_position,
+        upper=policy.max_position,
+    )
+
+    # Entry/exit logic for decision day
+    if lower is not None:
+        point_entry_ok = lower > float(enter_threshold)
+    else:
+        point_entry_ok = pred > float(enter_threshold)
+
+    point_exit_ok = pred < float(exit_threshold)
 
     enter_ok = point_entry_ok & trend_ok & (~blocked)
     exit_ok = point_exit_ok | (~trend_ok) | blocked
 
     decision_weight = np.zeros(len(out), dtype=float)
+    decision_entry_signal = np.zeros(len(out), dtype=int)
+    decision_exit_signal = np.zeros(len(out), dtype=int)
 
     in_pos = False
     current_weight = 0.0
@@ -262,43 +218,71 @@ def build_long_only_positions(
                 in_pos = True
                 current_weight = float(desired_weight.iloc[i])
                 hold_bars = 0
+                decision_entry_signal[i] = 1
             else:
                 current_weight = 0.0
         else:
             hold_bars += 1
 
-            # rebalance only while position stays valid
-            if bool(enter_ok.iloc[i]):
-                current_weight = float(desired_weight.iloc[i])
-            else:
-                current_weight = float(current_weight)
+            # Rebalance while position is open
+            current_weight = float(
+                np.clip(
+                    desired_weight.iloc[i],
+                    policy.min_position,
+                    policy.max_position,
+                )
+            )
 
             if hold_bars >= int(policy.min_hold_bars) and bool(exit_ok.iloc[i]):
                 in_pos = False
                 current_weight = 0.0
                 cooldown_left = int(policy.cooldown_bars)
                 hold_bars = 0
+                decision_exit_signal[i] = 1
 
         decision_weight[i] = current_weight
 
-    decision_weight_series = pd.Series(decision_weight, index=out.index, dtype=float)
-
     out["enter_threshold"] = float(enter_threshold)
     out["exit_threshold"] = float(exit_threshold)
+
     out["trend_ok"] = trend_ok.astype(int)
     out["blocked_regime"] = blocked.astype(int)
-    out["vol_scale"] = vol_scale.astype(float)
-    out["confidence"] = interval_conf.astype(float)
-    out["desired_weight"] = desired_weight.astype(float)
-    out["decision_weight"] = decision_weight_series.astype(float)
 
-    out["position"] = decision_weight_series.shift(int(policy.execution_lag)).fillna(0.0).clip(
-        lower=policy.min_position,
-        upper=policy.max_position,
+    out["point_entry_ok"] = point_entry_ok.astype(int)
+    out["point_exit_ok"] = point_exit_ok.astype(int)
+    out["decision_enter_ok"] = enter_ok.astype(int)
+    out["decision_exit_ok"] = exit_ok.astype(int)
+
+    out["vol_scale"] = vol_scale.astype(float)
+    out["confidence"] = raw_conf.astype(float)
+    out["desired_weight"] = desired_weight.astype(float)
+
+    out["decision_weight"] = decision_weight
+    out["decision_position"] = decision_weight
+
+    out["decision_entry_signal"] = decision_entry_signal
+    out["decision_exit_signal"] = decision_exit_signal
+
+    lag = max(int(policy.execution_lag), 0)
+
+    out["position"] = (
+        pd.Series(decision_weight, index=out.index)
+        .shift(lag)
+        .fillna(0.0)
+        .clip(lower=policy.min_position, upper=policy.max_position)
     )
 
-    prev_pos = out["position"].shift(1).fillna(0.0)
-    out["signal"] = ((out["position"] > 0).astype(int) - (prev_pos > 0).astype(int)).clip(lower=0)
+    prev_exec_pos = out["position"].shift(1).fillna(0.0)
+    out["execution_entry_signal"] = (
+        ((out["position"] > 0).astype(int) - (prev_exec_pos > 0).astype(int)).clip(lower=0)
+    )
+    out["execution_exit_signal"] = (
+        ((prev_exec_pos > 0).astype(int) - (out["position"] > 0).astype(int)).clip(lower=0)
+    )
+
+    # Backward-compatible alias
+    out["signal"] = out["execution_entry_signal"]
+
     out["turnover"] = out["position"].diff().abs().fillna(out["position"].abs())
 
     commission_rate = float(commission_bps) / 10_000.0
@@ -309,7 +293,7 @@ def build_long_only_positions(
     out["gross_ret"] = out["position"] * daily_ret
     out["net_ret"] = out["gross_ret"] - out["total_cost"]
 
-    # compatibility aliases
+    # Compatibility aliases
     out["strategy_return"] = out["net_ret"]
     out["actual_return"] = daily_ret
     out["close_used"] = _coerce_numeric(out[close_col])
@@ -336,6 +320,15 @@ def build_buyhold_path(
     daily_ret = _coerce_numeric(out[ret_col])
 
     out["position"] = 1.0
+    out["decision_position"] = 1.0
+    out["decision_weight"] = 1.0
+
+    out["decision_entry_signal"] = 0
+    out["decision_exit_signal"] = 0
+    out["execution_entry_signal"] = 0
+    out["execution_exit_signal"] = 0
+    out["signal"] = 0
+
     out["turnover"] = 0.0
     out["commission_cost"] = 0.0
     out["slippage_cost"] = 0.0
