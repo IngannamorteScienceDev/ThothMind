@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -17,7 +16,6 @@ from thothmind.core.execution.position import (
 )
 
 
-@dataclass
 class WalkforwardResult(dict):
     """
     Dict-like result that is also tuple-unpackable.
@@ -25,6 +23,9 @@ class WalkforwardResult(dict):
     Order:
     predictions_oos, signals_oos, sim_oos, window_metrics, run_metrics
     """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     def __iter__(self):
         yield self["predictions_oos"]
@@ -44,22 +45,88 @@ def _first_existing_col(df: pd.DataFrame, names: list[str]) -> str | None:
     return None
 
 
-def _infer_target_col(df: pd.DataFrame) -> str:
-    candidates = [
-        "target",
-        "target_return",
-        "target_return_1d",
-        "target_return_5d",
-        "target_return_10d",
-        "target_return_20d",
-    ]
+def _infer_target_col(
+    df: pd.DataFrame,
+    *,
+    explicit_target_col: str | None = None,
+    horizon: int | None = None,
+) -> str:
+    if explicit_target_col and explicit_target_col in df.columns:
+        return explicit_target_col
+
+    candidates: list[str] = []
+
+    if explicit_target_col:
+        candidates.append(explicit_target_col)
+
+    if horizon is not None:
+        h = int(horizon)
+        candidates.extend(
+            [
+                f"target_return_{h}d",
+                f"target_return_{h}",
+                f"future_return_{h}d",
+                f"future_return_{h}",
+                f"forward_return_{h}d",
+                f"forward_return_{h}",
+                f"fwd_return_{h}d",
+                f"fwd_return_{h}",
+                f"label_return_{h}d",
+                f"label_return_{h}",
+                f"target_{h}d",
+                f"target_{h}",
+                f"y_{h}d",
+                f"y_{h}",
+            ]
+        )
+
+    candidates.extend(
+        [
+            "target",
+            "y",
+            "label",
+            "y_reg",
+            "label_reg",
+            "target_reg",
+            "target_return",
+            "future_return",
+            "forward_return",
+            "fwd_return",
+            "next_return",
+            "y_return",
+            "label_return",
+        ]
+    )
+
     col = _first_existing_col(df, candidates)
     if col is not None:
         return col
 
-    dynamic = [c for c in df.columns if c.lower().startswith("target_return_")]
-    if dynamic:
-        return dynamic[0]
+    forbidden_exact = {
+        "return_1d",
+        "ret_1d",
+        "daily_return",
+        "gross_ret",
+        "net_ret",
+        "strategy_return",
+        "actual_return",
+    }
+
+    heuristic_candidates: list[str] = []
+    for c in df.columns:
+        lc = c.lower()
+        if lc in forbidden_exact:
+            continue
+        if not pd.api.types.is_numeric_dtype(df[c]):
+            continue
+        if any(tok in lc for tok in ["target", "label", "future", "forward", "fwd", "next"]) or lc in {
+            "y",
+            "y_reg",
+        }:
+            heuristic_candidates.append(c)
+
+    if heuristic_candidates:
+        return heuristic_candidates[0]
 
     raise KeyError("Could not infer target column.")
 
@@ -172,16 +239,28 @@ def _build_policy(decision_cfg: dict[str, Any] | None, sim_cfg: dict[str, Any] |
 
 
 def _run_metrics_from_sim(sim_oos: pd.DataFrame) -> dict[str, Any]:
-    metrics = compute_performance_metrics(sim_oos["net_ret"], periods_per_year=252, enforce_returns_input=True)
+    metrics = compute_performance_metrics(
+        sim_oos["net_ret"],
+        periods_per_year=252,
+        enforce_returns_input=True,
+    )
     metrics["total_return"] = float(sim_oos["equity"].iloc[-1] - 1.0) if not sim_oos.empty else 0.0
     metrics["total_return_pct"] = metrics["total_return"] * 100.0
     metrics["sharpe"] = float(metrics.get("sharpe", 0.0))
     metrics["max_drawdown"] = float(metrics.get("max_drawdown", 0.0))
     metrics["max_drawdown_pct"] = metrics["max_drawdown"] * 100.0
-    metrics["mean_net_ret"] = float(pd.to_numeric(sim_oos["net_ret"], errors="coerce").mean()) if not sim_oos.empty else 0.0
-    metrics["avg_exposure"] = float(pd.to_numeric(sim_oos["position"], errors="coerce").mean()) if "position" in sim_oos.columns else 0.0
-    metrics["avg_turnover"] = float(pd.to_numeric(sim_oos["turnover"], errors="coerce").mean()) if "turnover" in sim_oos.columns else 0.0
-    metrics["total_cost_sum"] = float(pd.to_numeric(sim_oos["total_cost"], errors="coerce").sum()) if "total_cost" in sim_oos.columns else 0.0
+    metrics["mean_net_ret"] = (
+        float(pd.to_numeric(sim_oos["net_ret"], errors="coerce").mean()) if not sim_oos.empty else 0.0
+    )
+    metrics["avg_exposure"] = (
+        float(pd.to_numeric(sim_oos["position"], errors="coerce").mean()) if "position" in sim_oos.columns else 0.0
+    )
+    metrics["avg_turnover"] = (
+        float(pd.to_numeric(sim_oos["turnover"], errors="coerce").mean()) if "turnover" in sim_oos.columns else 0.0
+    )
+    metrics["total_cost_sum"] = (
+        float(pd.to_numeric(sim_oos["total_cost"], errors="coerce").sum()) if "total_cost" in sim_oos.columns else 0.0
+    )
     metrics["n_days"] = int(len(sim_oos))
     return metrics
 
@@ -195,6 +274,12 @@ def run_walkforward_ml_oos(
     walkforward_cfg: dict[str, Any] | None = None,
     costs_cfg: dict[str, Any] | None = None,
     sim_cfg: dict[str, Any] | None = None,
+    features_cfg: dict[str, Any] | None = None,
+    target_col: str | None = None,
+    target_column: str | None = None,
+    label_col: str | None = None,
+    y_col: str | None = None,
+    horizon: int | None = None,
     step: int | None = None,
     **_: Any,
 ) -> WalkforwardResult:
@@ -220,7 +305,19 @@ def run_walkforward_ml_oos(
     slippage_k = float(costs.get("slippage_k", 0.15))
 
     df = df_feat.copy().sort_values("date").reset_index(drop=True)
-    target_col = _infer_target_col(df)
+    explicit_target = target_col or target_column or label_col or y_col
+
+    cfg_horizon = None
+    if horizon is not None:
+        cfg_horizon = int(horizon)
+    elif isinstance(features_cfg, dict) and features_cfg.get("horizon") is not None:
+        cfg_horizon = int(features_cfg["horizon"])
+
+    target_col = _infer_target_col(
+        df,
+        explicit_target_col=explicit_target,
+        horizon=cfg_horizon,
+    )
     ret_col = resolve_return_col(df)
 
     if feature_cols is None:
@@ -276,6 +373,7 @@ def run_walkforward_ml_oos(
         pred_span["pred"] = test_pred
         pred_span["y_true"] = y_test.to_numpy()
         pred_span["target_col_name"] = target_col
+
         pred_parts.append(
             pred_span[
                 [c for c in ["date", "window_id", "pred", "y_true", target_col, ret_col, "market_regime"] if c in pred_span.columns]
@@ -300,9 +398,12 @@ def run_walkforward_ml_oos(
         sim_span["window_id"] = window_id
         sim_parts.append(sim_span.copy())
 
-        rolling_equity = float(sim_span["equity"].iloc[-1])
+        window_metrics = compute_performance_metrics(
+            sim_span["net_ret"],
+            periods_per_year=252,
+            enforce_returns_input=True,
+        )
 
-        window_metrics = compute_performance_metrics(sim_span["net_ret"], periods_per_year=252, enforce_returns_input=True)
         win_rows.append(
             {
                 "window_id": window_id,
@@ -320,12 +421,13 @@ def run_walkforward_ml_oos(
                 "median_pred_test": float(np.median(test_pred)),
                 "trades": int(sig_span["signal"].sum()),
                 "avg_exposure": float(sig_span["position"].mean()),
-                "total_return": float(sim_span["equity"].iloc[-1] / max(rolling_equity / (1.0 + sim_span["net_ret"]).cumprod().iloc[-1], 1e-12) - 1.0) if not sim_span.empty else 0.0,
-                "window_total_return": float(sim_span["equity"].iloc[-1] / float(sim_span["equity"].iloc[0]) - 1.0) if len(sim_span) > 1 else float(sim_span["net_ret"].sum()),
+                "window_total_return": float(sim_span["equity"].iloc[-1] / rolling_equity - 1.0),
                 "window_sharpe": float(window_metrics.get("sharpe", 0.0)),
                 "window_max_drawdown": float(window_metrics.get("max_drawdown", 0.0)),
             }
         )
+
+        rolling_equity = float(sim_span["equity"].iloc[-1])
 
     predictions_oos = pd.concat(pred_parts, ignore_index=True).sort_values("date").reset_index(drop=True)
     signals_oos = pd.concat(sig_parts, ignore_index=True).sort_values("date").reset_index(drop=True)
@@ -334,7 +436,7 @@ def run_walkforward_ml_oos(
 
     run_metrics = _run_metrics_from_sim(sim_oos)
 
-    result = WalkforwardResult(
+    return WalkforwardResult(
         predictions_oos=predictions_oos,
         signals_oos=signals_oos,
         sim_oos=sim_oos,
@@ -342,8 +444,6 @@ def run_walkforward_ml_oos(
         run_metrics=run_metrics,
         feature_cols=feature_cols,
     )
-    return result
 
 
-# Compatibility alias
 run_walkforward_ml = run_walkforward_ml_oos
