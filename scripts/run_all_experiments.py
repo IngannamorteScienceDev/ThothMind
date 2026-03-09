@@ -146,6 +146,7 @@ CANDIDATE_METRIC_FILENAMES = [
     "evaluation.json",
     "registry.json",
     "manifest.json",
+    "oos_significance.json",
     "summary.csv",
     "metrics.csv",
     "performance.csv",
