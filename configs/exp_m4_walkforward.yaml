@@ -28,7 +28,6 @@ walkforward:
   test_size: 63
   step: 63
 
-# Walk-forward policy (choose one)
 wf_policy:
   type: "sma"
   sma_window: 200
@@ -39,3 +38,4 @@ costs:
 
 sim:
   initial_equity: 1.0
+  execution_lag: 1

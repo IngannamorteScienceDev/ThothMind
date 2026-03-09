@@ -12,6 +12,7 @@ import traceback
 from contextlib import redirect_stderr, redirect_stdout
 from copy import deepcopy
 from pathlib import Path
+from statistics import median
 from typing import Any, Iterable
 
 import yaml
@@ -66,6 +67,7 @@ RETURN_KEYS_PRIORITY = [
 
 SHARPE_KEYS_PRIORITY = [
     "strategy_sharpe",
+    "strat_sharpe",
     "sharpe_ratio",
     "sharpe",
 ]
@@ -75,6 +77,8 @@ MAX_DD_KEYS_PRIORITY = [
     "max_drawdown",
     "strategy_max_drawdown_pct",
     "strategy_max_drawdown",
+    "strat_max_drawdown_pct",
+    "strat_max_drawdown",
     "drawdown_pct",
     "drawdown",
 ]
@@ -106,6 +110,27 @@ HORIZON_KEYS_PRIORITY = [
     "forecast_horizon",
     "label_horizon",
     "target_horizon",
+]
+
+P_VALUE_KEYS_PRIORITY = [
+    "p_value_one_sided",
+    "p_value",
+    "bootstrap_p_value",
+    "pvalue",
+]
+
+PROB_OUTPERFORM_KEYS_PRIORITY = [
+    "prob_outperform",
+    "outperform_probability",
+    "probability_outperform",
+]
+
+REL_RETURN_KEYS_PRIORITY = [
+    "actual_rel_return",
+    "rel_return",
+    "relative_return",
+    "delta_total_rel_return",
+    "total_rel_return",
 ]
 
 CANDIDATE_METRIC_FILENAMES = [
@@ -166,6 +191,15 @@ def read_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
+def try_read_yaml(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        return read_yaml(path)
+    except Exception:
+        return None
+
+
 def write_yaml(path: Path, obj: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
@@ -175,6 +209,19 @@ def write_yaml(path: Path, obj: dict[str, Any]) -> None:
 def save_json(path: Path, obj: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def try_read_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    for encoding in ("utf-8", "utf-8-sig"):
+        try:
+            data = json.loads(path.read_text(encoding=encoding))
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            continue
+    return None
 
 
 def compute_cfg_hash(cfg: dict[str, Any]) -> str:
@@ -236,6 +283,37 @@ def newest_run_dir(output_dir: Path, before_names: set[str]) -> Path | None:
     candidates = [output_dir / name for name in new_dirs]
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return candidates[0]
+
+
+def extract_cfg_context(effective_cfg: dict[str, Any], ticker: str) -> dict[str, Any]:
+    pipeline_cfg = effective_cfg.get("pipeline", {})
+    stage = None
+    if isinstance(pipeline_cfg, dict):
+        stage = pipeline_cfg.get("stage")
+
+    suite_cfg = effective_cfg.get("suite")
+    suite_tickers: list[str] = []
+    if isinstance(suite_cfg, dict):
+        tickers = suite_cfg.get("tickers")
+        if isinstance(tickers, list):
+            suite_tickers = [str(t).upper() for t in tickers if str(t).strip()]
+
+    is_m8 = str(stage).lower() == "m8"
+    n_suite_tickers = len(suite_tickers) if suite_tickers else (1 if is_m8 else 0)
+
+    if not is_m8:
+        suite_mode = "not_suite"
+    else:
+        suite_mode = "single_ticker" if n_suite_tickers <= 1 else "multi_ticker"
+
+    return {
+        "stage": stage,
+        "suite_tickers": suite_tickers,
+        "n_suite_tickers": int(n_suite_tickers),
+        "suite_mode": suite_mode,
+        "is_single_ticker_suite": bool(is_m8 and n_suite_tickers <= 1),
+        "batch_selected_ticker": str(ticker).upper(),
+    }
 
 
 def persist_run_metadata(run_dir: Path | None, effective_cfg: dict[str, Any], batch_record: dict[str, Any]) -> None:
@@ -307,7 +385,100 @@ def extract_metrics_from_json_file(path: Path) -> dict[str, float]:
     return {}
 
 
+def _mean(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return float(sum(values) / len(values))
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return float(median(values))
+
+
+def _worst_drawdown(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return float(min(values))
+
+
+def extract_metrics_from_suite_summary_csv(path: Path) -> dict[str, float]:
+    for encoding in ("utf-8-sig", "utf-8"):
+        try:
+            with path.open("r", encoding=encoding, newline="") as f:
+                rows = list(csv.DictReader(f))
+            if not rows:
+                return {}
+            break
+        except Exception:
+            rows = []
+    if not rows:
+        return {}
+
+    out: dict[str, float] = {}
+    out["n_suite_tickers"] = float(len(rows))
+
+    status_vals = [str(r.get("status", "")).strip().lower() for r in rows]
+    if any(status_vals):
+        out["n_suite_ok"] = float(sum(1 for s in status_vals if s == "ok"))
+        out["suite_ok_ratio"] = float(sum(1 for s in status_vals if s == "ok") / len(rows))
+
+    numeric_by_col: dict[str, list[float]] = {}
+    for row in rows:
+        for k, v in row.items():
+            num = try_parse_float(v)
+            if num is None:
+                continue
+            nk = normalize_key(k)
+            numeric_by_col.setdefault(nk, []).append(num)
+
+    for col, vals in numeric_by_col.items():
+        if not vals:
+            continue
+        out[f"{col}_mean"] = float(sum(vals) / len(vals))
+        out[f"{col}_median"] = float(median(vals))
+
+    # Generic aliases for ranking/UI
+    if "actual_rel_return" in numeric_by_col:
+        out["actual_rel_return"] = _mean(numeric_by_col["actual_rel_return"])
+    if "prob_outperform" in numeric_by_col:
+        out["prob_outperform"] = _mean(numeric_by_col["prob_outperform"])
+    if "p_value_one_sided" in numeric_by_col:
+        out["p_value_one_sided"] = _mean(numeric_by_col["p_value_one_sided"])
+
+    if "strat_total_return" in numeric_by_col:
+        out["total_return"] = _mean(numeric_by_col["strat_total_return"])
+    elif "total_return" in numeric_by_col:
+        out["total_return"] = _mean(numeric_by_col["total_return"])
+
+    if "strat_sharpe" in numeric_by_col:
+        out["sharpe"] = _mean(numeric_by_col["strat_sharpe"])
+    elif "sharpe" in numeric_by_col:
+        out["sharpe"] = _mean(numeric_by_col["sharpe"])
+
+    if "strat_max_drawdown" in numeric_by_col:
+        out["max_drawdown"] = _worst_drawdown(numeric_by_col["strat_max_drawdown"])
+    elif "max_drawdown" in numeric_by_col:
+        out["max_drawdown"] = _worst_drawdown(numeric_by_col["max_drawdown"])
+
+    if "win_rate" in numeric_by_col:
+        out["win_rate"] = _mean(numeric_by_col["win_rate"])
+    if "win_rate_pct" in numeric_by_col:
+        out["win_rate_pct"] = _mean(numeric_by_col["win_rate_pct"])
+
+    if "n_trades" in numeric_by_col:
+        out["n_trades"] = _mean(numeric_by_col["n_trades"])
+    elif "trades" in numeric_by_col:
+        out["trades"] = _mean(numeric_by_col["trades"])
+
+    return out
+
+
 def extract_metrics_from_csv_file(path: Path) -> dict[str, float]:
+    if path.name == "suite_summary.csv":
+        return extract_metrics_from_suite_summary_csv(path)
+
     for encoding in ("utf-8-sig", "utf-8"):
         try:
             with path.open("r", encoding=encoding, newline="") as f:
@@ -555,6 +726,8 @@ def run_one_job(
     cfg_hash: str = job["cfg_hash"]
     key: str = job["key"]
 
+    cfg_ctx = extract_cfg_context(effective_cfg, ticker)
+
     job_slug = f"{cfg_path.stem}__{ticker}__{cfg_hash}"
     tmp_cfg_path = tmp_dir / f"{job_slug}.yaml"
     write_yaml(tmp_cfg_path, effective_cfg)
@@ -573,6 +746,11 @@ def run_one_job(
         "cfg_hash": cfg_hash,
         "started_ts": started_at,
         "tmp_cfg_path": str(tmp_cfg_path),
+        "stage": cfg_ctx["stage"],
+        "suite_mode": cfg_ctx["suite_mode"],
+        "n_suite_tickers": cfg_ctx["n_suite_tickers"],
+        "is_single_ticker_suite": cfg_ctx["is_single_ticker_suite"],
+        "suite_tickers": cfg_ctx["suite_tickers"],
     }
 
     try:
@@ -682,6 +860,73 @@ def print_final_summary(results: list[dict[str, Any]]) -> None:
         console.print(ft)
 
 
+def load_run_context(run_dir: Path, state_by_dir: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    state_rec = state_by_dir.get(str(run_dir.resolve()), {})
+    batch_meta = try_read_json(run_dir / "_batch_meta.json") or {}
+    effective_cfg = try_read_yaml(run_dir / "_effective_config.yaml") or {}
+
+    ctx = {}
+    ctx.update(batch_meta)
+    ctx.update(state_rec)
+
+    if effective_cfg:
+        cfg_ctx = extract_cfg_context(effective_cfg, str(ctx.get("ticker") or ""))
+        for k, v in cfg_ctx.items():
+            ctx.setdefault(k, v)
+
+    ctx.setdefault("config", guess_config_from_run_dir(run_dir, state_by_dir))
+    ctx.setdefault("ticker", None)
+    ctx.setdefault("stage", None)
+    ctx.setdefault("suite_mode", "not_suite")
+    ctx.setdefault("n_suite_tickers", 0)
+    ctx.setdefault("is_single_ticker_suite", False)
+    return ctx
+
+
+def compute_defense_ready_score(row: dict[str, Any]) -> float | None:
+    ret = row.get("return_metric_pct")
+    sharpe = row.get("sharpe")
+    dd = row.get("max_drawdown_pct")
+    p_value = row.get("p_value_one_sided")
+    prob_outperform_pct = row.get("prob_outperform_pct")
+    stage = str(row.get("stage") or "").lower()
+    suite_mode = str(row.get("suite_mode") or "")
+    is_single_ticker_suite = bool(row.get("is_single_ticker_suite"))
+
+    if ret is None:
+        return None
+    if is_single_ticker_suite:
+        return None
+
+    score = 0.0
+
+    # Capped return contribution: useful, but should not dominate everything.
+    score += min(max(float(ret), -100.0), 300.0) * 0.30
+
+    if sharpe is not None:
+        score += float(sharpe) * 40.0
+
+    if dd is not None:
+        dd_float = float(dd)
+        if dd_float < 0:
+            score -= max(0.0, abs(dd_float) - 20.0) * 1.5
+
+    if p_value is not None:
+        pv = min(max(float(p_value), 0.0), 1.0)
+        score += (1.0 - pv) * 35.0
+
+    if prob_outperform_pct is not None:
+        prob01 = float(prob_outperform_pct) / 100.0 if float(prob_outperform_pct) > 1.0 else float(prob_outperform_pct)
+        score += max(0.0, prob01 - 0.5) * 40.0
+
+    if stage == "m7":
+        score += 3.0
+    if stage == "m8" and suite_mode == "multi_ticker":
+        score += 5.0
+
+    return round(score, 6)
+
+
 def build_results_index_and_showcase(
     *,
     output_dir: Path,
@@ -713,7 +958,15 @@ def build_results_index_and_showcase(
     rows_csv: list[dict[str, Any]] = []
 
     for run_dir in run_dirs:
+        ctx = load_run_context(run_dir, ok_state_by_run_dir)
         metrics, metric_files = collect_metrics_from_run_dir(run_dir)
+
+        # For m8, force suite-level aggregate metrics to override any nested ticker metrics.
+        if str(ctx.get("stage") or "").lower() == "m8":
+            suite_summary_path = run_dir / "suite_summary.csv"
+            if suite_summary_path.exists():
+                suite_metrics = extract_metrics_from_suite_summary_csv(suite_summary_path)
+                metrics.update(suite_metrics)
 
         ret_key, ret_val = pick_best_metric(metrics, RETURN_KEYS_PRIORITY)
         sharpe_key, sharpe_val = pick_best_metric(metrics, SHARPE_KEYS_PRIORITY)
@@ -722,15 +975,33 @@ def build_results_index_and_showcase(
         trades_key, trades_val = pick_best_metric(metrics, TRADES_KEYS_PRIORITY)
         thr_key, thr_val = pick_best_metric(metrics, THRESHOLD_KEYS_PRIORITY)
         horizon_key, horizon_val = pick_best_metric(metrics, HORIZON_KEYS_PRIORITY)
+        p_key, p_val = pick_best_metric(metrics, P_VALUE_KEYS_PRIORITY)
+        prob_key, prob_val = pick_best_metric(metrics, PROB_OUTPERFORM_KEYS_PRIORITY)
+        rel_key, rel_val = pick_best_metric(metrics, REL_RETURN_KEYS_PRIORITY)
+
+        stage = ctx.get("stage")
+        suite_mode = ctx.get("suite_mode")
+        n_suite_tickers = int(ctx.get("n_suite_tickers") or 0)
+        is_single_ticker_suite = bool(ctx.get("is_single_ticker_suite"))
+
+        exclude_from_showcase = bool(str(stage).lower() == "m8" and is_single_ticker_suite)
 
         row_json = {
-            "config": guess_config_from_run_dir(run_dir, ok_state_by_run_dir),
-            "ticker": ok_state_by_run_dir.get(str(run_dir.resolve()), {}).get("ticker"),
-            "cfg_hash": ok_state_by_run_dir.get(str(run_dir.resolve()), {}).get("cfg_hash"),
+            "config": ctx.get("config"),
+            "ticker": ctx.get("ticker"),
+            "cfg_hash": ctx.get("cfg_hash"),
+            "stage": stage,
+            "suite_mode": suite_mode,
+            "n_suite_tickers": n_suite_tickers,
+            "is_single_ticker_suite": is_single_ticker_suite,
+            "exclude_from_showcase": exclude_from_showcase,
             "run_dir": str(run_dir),
             "return_metric_key": ret_key,
             "return_metric_raw": ret_val,
             "return_metric_pct": metric_to_pct(ret_val, ret_key),
+            "actual_rel_return_key": rel_key,
+            "actual_rel_return_raw": rel_val,
+            "actual_rel_return_pct": metric_to_pct(rel_val, rel_key),
             "sharpe_key": sharpe_key,
             "sharpe": sharpe_val,
             "max_drawdown_key": dd_key,
@@ -745,25 +1016,42 @@ def build_results_index_and_showcase(
             "threshold": thr_val,
             "horizon_key": horizon_key,
             "horizon": horizon_val,
+            "p_value_key": p_key,
+            "p_value_one_sided": p_val,
+            "prob_outperform_key": prob_key,
+            "prob_outperform_raw": prob_val,
+            "prob_outperform_pct": metric_to_pct(prob_val, prob_key),
             "metric_files": [str(p) for p in metric_files],
             "metrics": metrics,
         }
+
+        row_json["defense_ready_score"] = compute_defense_ready_score(row_json)
+
         rows_json.append(row_json)
         rows_csv.append(
             {
                 "config": row_json["config"],
                 "ticker": row_json["ticker"],
                 "cfg_hash": row_json["cfg_hash"],
+                "stage": row_json["stage"],
+                "suite_mode": row_json["suite_mode"],
+                "n_suite_tickers": row_json["n_suite_tickers"],
+                "is_single_ticker_suite": row_json["is_single_ticker_suite"],
+                "exclude_from_showcase": row_json["exclude_from_showcase"],
                 "run_dir": row_json["run_dir"],
                 "return_metric_key": row_json["return_metric_key"],
                 "return_metric_raw": row_json["return_metric_raw"],
                 "return_metric_pct": row_json["return_metric_pct"],
+                "actual_rel_return_pct": row_json["actual_rel_return_pct"],
                 "sharpe": row_json["sharpe"],
                 "max_drawdown_pct": row_json["max_drawdown_pct"],
                 "win_rate_pct": row_json["win_rate_pct"],
                 "trades": row_json["trades"],
                 "threshold": row_json["threshold"],
                 "horizon": row_json["horizon"],
+                "p_value_one_sided": row_json["p_value_one_sided"],
+                "prob_outperform_pct": row_json["prob_outperform_pct"],
+                "defense_ready_score": row_json["defense_ready_score"],
                 "metric_file_count": len(metric_files),
             }
         )
@@ -774,9 +1062,21 @@ def build_results_index_and_showcase(
     save_json(all_json_path, rows_json)
     save_csv(all_csv_path, rows_csv)
 
-    ranked = [row for row in rows_json if row.get("return_metric_pct") is not None]
+    ranked = [
+        row
+        for row in rows_json
+        if row.get("return_metric_pct") is not None and not row.get("exclude_from_showcase", False)
+    ]
     ranked.sort(key=lambda row: row["return_metric_pct"], reverse=True)
     top_rows = ranked[:top_k]
+
+    ranked_defense = [
+        row
+        for row in rows_json
+        if row.get("defense_ready_score") is not None and not row.get("exclude_from_showcase", False)
+    ]
+    ranked_defense.sort(key=lambda row: row["defense_ready_score"], reverse=True)
+    top_defense_rows = ranked_defense[:top_k]
 
     showcase_dir.mkdir(parents=True, exist_ok=True)
     for old in showcase_dir.glob("rank_*"):
@@ -790,6 +1090,8 @@ def build_results_index_and_showcase(
 
     top_json_path = showcase_dir / f"top{top_k}_by_return.json"
     top_csv_path = showcase_dir / f"top{top_k}_by_return.csv"
+    defense_json_path = showcase_dir / f"top{top_k}_defense_ready.json"
+    defense_csv_path = showcase_dir / f"top{top_k}_defense_ready.csv"
 
     save_json(top_json_path, top_rows)
     save_csv(
@@ -799,17 +1101,50 @@ def build_results_index_and_showcase(
                 "rank": idx,
                 "ticker": row.get("ticker"),
                 "config": row.get("config"),
+                "stage": row.get("stage"),
+                "suite_mode": row.get("suite_mode"),
+                "n_suite_tickers": row.get("n_suite_tickers"),
                 "return_metric_key": row.get("return_metric_key"),
                 "return_metric_pct": row.get("return_metric_pct"),
+                "actual_rel_return_pct": row.get("actual_rel_return_pct"),
                 "sharpe": row.get("sharpe"),
                 "max_drawdown_pct": row.get("max_drawdown_pct"),
                 "win_rate_pct": row.get("win_rate_pct"),
+                "p_value_one_sided": row.get("p_value_one_sided"),
+                "prob_outperform_pct": row.get("prob_outperform_pct"),
                 "trades": row.get("trades"),
                 "threshold": row.get("threshold"),
                 "horizon": row.get("horizon"),
                 "run_dir": row.get("run_dir"),
             }
             for idx, row in enumerate(top_rows, start=1)
+        ],
+    )
+
+    save_json(defense_json_path, top_defense_rows)
+    save_csv(
+        defense_csv_path,
+        [
+            {
+                "rank": idx,
+                "ticker": row.get("ticker"),
+                "config": row.get("config"),
+                "stage": row.get("stage"),
+                "suite_mode": row.get("suite_mode"),
+                "n_suite_tickers": row.get("n_suite_tickers"),
+                "defense_ready_score": row.get("defense_ready_score"),
+                "return_metric_pct": row.get("return_metric_pct"),
+                "actual_rel_return_pct": row.get("actual_rel_return_pct"),
+                "sharpe": row.get("sharpe"),
+                "max_drawdown_pct": row.get("max_drawdown_pct"),
+                "p_value_one_sided": row.get("p_value_one_sided"),
+                "prob_outperform_pct": row.get("prob_outperform_pct"),
+                "trades": row.get("trades"),
+                "threshold": row.get("threshold"),
+                "horizon": row.get("horizon"),
+                "run_dir": row.get("run_dir"),
+            }
+            for idx, row in enumerate(top_defense_rows, start=1)
         ],
     )
 
@@ -828,11 +1163,19 @@ def build_results_index_and_showcase(
                     "ticker": row.get("ticker"),
                     "config": row.get("config"),
                     "cfg_hash": row.get("cfg_hash"),
+                    "stage": row.get("stage"),
+                    "suite_mode": row.get("suite_mode"),
+                    "n_suite_tickers": row.get("n_suite_tickers"),
+                    "is_single_ticker_suite": row.get("is_single_ticker_suite"),
                     "return_metric_key": row.get("return_metric_key"),
                     "return_metric_pct": row.get("return_metric_pct"),
+                    "actual_rel_return_pct": row.get("actual_rel_return_pct"),
                     "sharpe": row.get("sharpe"),
                     "max_drawdown_pct": row.get("max_drawdown_pct"),
                     "win_rate_pct": row.get("win_rate_pct"),
+                    "p_value_one_sided": row.get("p_value_one_sided"),
+                    "prob_outperform_pct": row.get("prob_outperform_pct"),
+                    "defense_ready_score": row.get("defense_ready_score"),
                     "trades": row.get("trades"),
                     "threshold": row.get("threshold"),
                     "horizon": row.get("horizon"),
@@ -849,7 +1192,7 @@ def build_results_index_and_showcase(
     top_table.add_column("Return %", justify="right", style="green")
     top_table.add_column("Sharpe", justify="right", style="magenta")
     top_table.add_column("Max DD %", justify="right", style="red")
-    top_table.add_column("Win rate %", justify="right", style="yellow")
+    top_table.add_column("p-value", justify="right", style="yellow")
 
     for idx, row in enumerate(top_rows, start=1):
         top_table.add_row(
@@ -859,10 +1202,31 @@ def build_results_index_and_showcase(
             format_metric(row.get("return_metric_pct"), digits=2),
             format_metric(row.get("sharpe"), digits=4),
             format_metric(row.get("max_drawdown_pct"), digits=2),
-            format_metric(row.get("win_rate_pct"), digits=2),
+            format_metric(row.get("p_value_one_sided"), digits=4),
+        )
+
+    defense_table = Table(title=f"Top-{top_k} defense-ready", box=box.MINIMAL_HEAVY_HEAD)
+    defense_table.add_column("Rank", justify="right", style="cyan")
+    defense_table.add_column("Ticker", style="white")
+    defense_table.add_column("Config", style="white")
+    defense_table.add_column("Score", justify="right", style="green")
+    defense_table.add_column("Return %", justify="right", style="green")
+    defense_table.add_column("Sharpe", justify="right", style="magenta")
+    defense_table.add_column("p-value", justify="right", style="yellow")
+
+    for idx, row in enumerate(top_defense_rows, start=1):
+        defense_table.add_row(
+            str(idx),
+            str(row.get("ticker") or "-"),
+            str(row.get("config") or "-"),
+            format_metric(row.get("defense_ready_score"), digits=3),
+            format_metric(row.get("return_metric_pct"), digits=2),
+            format_metric(row.get("sharpe"), digits=4),
+            format_metric(row.get("p_value_one_sided"), digits=4),
         )
 
     console.print(top_table)
+    console.print(defense_table)
     console.print(
         Panel(
             "\n".join(
@@ -871,8 +1235,11 @@ def build_results_index_and_showcase(
                     f"[bold]All index CSV:[/bold] {all_csv_path}",
                     f"[bold]Top JSON:[/bold] {top_json_path}",
                     f"[bold]Top CSV:[/bold] {top_csv_path}",
+                    f"[bold]Defense JSON:[/bold] {defense_json_path}",
+                    f"[bold]Defense CSV:[/bold] {defense_csv_path}",
                     f"[bold]Showcase dir:[/bold] {showcase_dir}",
                     f"[bold]Ranked runs:[/bold] {len(ranked)}",
+                    f"[bold]Defense-ranked runs:[/bold] {len(ranked_defense)}",
                 ]
             ),
             title="[green]Post-processing complete[/green]",
@@ -885,9 +1252,13 @@ def build_results_index_and_showcase(
         "all_csv_path": str(all_csv_path),
         "top_json_path": str(top_json_path),
         "top_csv_path": str(top_csv_path),
+        "defense_json_path": str(defense_json_path),
+        "defense_csv_path": str(defense_csv_path),
         "showcase_dir": str(showcase_dir),
         "ranked_runs": len(ranked),
+        "defense_ranked_runs": len(ranked_defense),
         "top_count": len(top_rows),
+        "defense_top_count": len(top_defense_rows),
     }
 
 
