@@ -473,8 +473,12 @@ def run_walkforward_ml_conformal_oos(
         rolling_equity = float(sim_span["equity"].iloc[-1])
 
     predictions_oos = pd.concat(pred_parts, ignore_index=True).sort_values("date").reset_index(drop=True)
-    signals_oos = pd.concat(sig_parts, ignore_index=True).sort_values("date").reset_index(drop=True)
     sim_oos = pd.concat(sim_parts, ignore_index=True).sort_values("date").reset_index(drop=True)
+
+    # Backward-compatible contract:
+    # older run.py/reporting code expects signals_oos to already contain equity/drawdown/net_ret columns
+    signals_oos = sim_oos.copy()
+
     window_metrics_df = pd.DataFrame(win_rows)
 
     run_metrics = _run_metrics_from_sim(sim_oos)
