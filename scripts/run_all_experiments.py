@@ -598,6 +598,10 @@ def discover_run_dirs(output_dir: Path) -> list[Path]:
     return sorted([p for p in output_dir.iterdir() if p.is_dir()])
 
 
+def has_real_run_dirs(output_dir: Path) -> bool:
+    return len(discover_run_dirs(output_dir)) > 0
+
+
 def guess_config_from_run_dir(run_dir: Path, state_by_dir: dict[str, dict[str, Any]]) -> str | None:
     rec = state_by_dir.get(str(run_dir.resolve()))
     if rec:
@@ -979,7 +983,7 @@ def build_results_index_and_showcase(
         n_suite_tickers = int(ctx.get("n_suite_tickers") or 0)
         is_single_ticker_suite = bool(ctx.get("is_single_ticker_suite"))
 
-        exclude_from_showcase = bool(str(stage).lower() == "m8" and suite_mode == "multi_ticker")
+        exclude_from_showcase = False
 
         row_json = {
             "config": ctx.get("config"),
@@ -1333,11 +1337,19 @@ def main() -> int:
     index_dir = (REPO_ROOT / args.index_dir).resolve()
     showcase_dir = (REPO_ROOT / args.showcase_dir).resolve()
 
-    done_keys = load_done_keys(state_path) if args.resume else set()
+    effective_resume = bool(args.resume)
+    if effective_resume and not has_real_run_dirs(output_dir):
+        console.print(
+            "[yellow]Resume was requested, but output_dir has no real run directories. "
+            "Resume will be disabled for this launch so jobs are recomputed from scratch.[/yellow]"
+        )
+        effective_resume = False
+
+    done_keys = load_done_keys(state_path) if effective_resume else set()
     jobs = prepare_jobs(
         configs=configs,
         tickers=tickers,
-        resume=args.resume,
+        resume=effective_resume,
         done_keys=done_keys,
         single_ticker_suite=not args.keep_suite_list,
         group_by_config=args.group_by_config,
@@ -1353,11 +1365,16 @@ def main() -> int:
         index_dir=index_dir,
         showcase_dir=showcase_dir,
         single_ticker_suite=not args.keep_suite_list,
-        resume=args.resume,
+        resume=effective_resume,
     )
 
     if not jobs:
         console.print("[yellow]Nothing to run. Resume filtered everything out.[/yellow]")
+        if not has_real_run_dirs(output_dir):
+            console.print(
+                "[yellow]Post-processing will not find anything because reports/runs is empty. "
+                "Run without --resume or keep run directories on disk.[/yellow]"
+            )
         if not args.skip_postprocess:
             build_results_index_and_showcase(
                 output_dir=output_dir,
