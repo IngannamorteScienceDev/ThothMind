@@ -440,7 +440,6 @@ def extract_metrics_from_suite_summary_csv(path: Path) -> dict[str, float]:
         out[f"{col}_mean"] = float(sum(vals) / len(vals))
         out[f"{col}_median"] = float(median(vals))
 
-    # Generic aliases for ranking/UI
     if "actual_rel_return" in numeric_by_col:
         out["actual_rel_return"] = _mean(numeric_by_col["actual_rel_return"])
     if "prob_outperform" in numeric_by_col:
@@ -892,16 +891,12 @@ def compute_defense_ready_score(row: dict[str, Any]) -> float | None:
     prob_outperform_pct = row.get("prob_outperform_pct")
     stage = str(row.get("stage") or "").lower()
     suite_mode = str(row.get("suite_mode") or "")
-    is_single_ticker_suite = bool(row.get("is_single_ticker_suite"))
 
     if ret is None:
-        return None
-    if is_single_ticker_suite:
         return None
 
     score = 0.0
 
-    # Capped return contribution: useful, but should not dominate everything.
     score += min(max(float(ret), -100.0), 300.0) * 0.30
 
     if sharpe is not None:
@@ -962,7 +957,6 @@ def build_results_index_and_showcase(
         ctx = load_run_context(run_dir, ok_state_by_run_dir)
         metrics, metric_files = collect_metrics_from_run_dir(run_dir)
 
-        # For m8, force suite-level aggregate metrics to override any nested ticker metrics.
         if str(ctx.get("stage") or "").lower() == "m8":
             suite_summary_path = run_dir / "suite_summary.csv"
             if suite_summary_path.exists():
@@ -985,7 +979,7 @@ def build_results_index_and_showcase(
         n_suite_tickers = int(ctx.get("n_suite_tickers") or 0)
         is_single_ticker_suite = bool(ctx.get("is_single_ticker_suite"))
 
-        exclude_from_showcase = bool(str(stage).lower() == "m8" and is_single_ticker_suite)
+        exclude_from_showcase = bool(str(stage).lower() == "m8" and suite_mode == "multi_ticker")
 
         row_json = {
             "config": ctx.get("config"),
