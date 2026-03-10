@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import argparse
@@ -19,6 +20,13 @@ try:
     console = Console()
 except Exception:
     console = None
+
+
+PRESET_COUNTS: dict[str, tuple[int, int]] = {
+    "demo": (30, 10),
+    "pilot": (60, 20),
+    "full": (150, 50),
+}
 
 
 @dataclass
@@ -52,8 +60,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-root", default="data", help="Root folder with Stocks/ and ETFs/")
     parser.add_argument("--stocks-dir", default="Stocks", help="Stocks subfolder name")
     parser.add_argument("--etfs-dir", default="ETFs", help="ETFs subfolder name")
-    parser.add_argument("--stock-count", type=int, default=150, help="How many stocks to select")
-    parser.add_argument("--etf-count", type=int, default=50, help="How many ETFs to select")
+    parser.add_argument(
+        "--preset",
+        choices=["demo", "pilot", "full"],
+        default="full",
+        help="Selection preset. Can be overridden by explicit --stock-count/--etf-count.",
+    )
+    parser.add_argument("--stock-count", type=int, default=None, help="How many stocks to select")
+    parser.add_argument("--etf-count", type=int, default=None, help="How many ETFs to select")
+    parser.add_argument(
+        "--selection-name",
+        default="",
+        help="Optional subfolder name inside output-dir. If omitted, it is derived automatically.",
+    )
     parser.add_argument(
         "--min-rows",
         type=int,
@@ -73,6 +92,12 @@ def parse_args() -> argparse.Namespace:
         help="Minimum allowed Volume fill rate",
     )
     parser.add_argument(
+        "--max-zero-volume-share",
+        type=float,
+        default=1.0,
+        help="Maximum allowed share of zero-volume rows among valid volume rows.",
+    )
+    parser.add_argument(
         "--workers",
         type=int,
         default=12,
@@ -81,9 +106,33 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         default="reports/universe_selection",
-        help="Where to save the selection reports",
+        help="Base folder where selection reports are stored",
+    )
+    parser.add_argument(
+        "--preview-limit",
+        type=int,
+        default=15,
+        help="How many selected rows to show in console preview",
     )
     return parser.parse_args()
+
+
+def resolve_selection_counts(args: argparse.Namespace) -> tuple[int, int]:
+    preset_stock_count, preset_etf_count = PRESET_COUNTS[args.preset]
+    stock_count = int(args.stock_count) if args.stock_count is not None else preset_stock_count
+    etf_count = int(args.etf_count) if args.etf_count is not None else preset_etf_count
+    return stock_count, etf_count
+
+
+def resolve_selection_name(args: argparse.Namespace, stock_count: int, etf_count: int) -> str:
+    if str(args.selection_name).strip():
+        return str(args.selection_name).strip()
+
+    custom_stock = args.stock_count is not None and int(args.stock_count) != PRESET_COUNTS[args.preset][0]
+    custom_etf = args.etf_count is not None and int(args.etf_count) != PRESET_COUNTS[args.preset][1]
+    if custom_stock or custom_etf:
+        return f"custom_{stock_count}s_{etf_count}e"
+    return f"{args.preset}_{stock_count}s_{etf_count}e"
 
 
 def ticker_from_filename(path: Path) -> str:
@@ -241,7 +290,11 @@ def scan_one_file(path: Path, kind: str) -> ScanRow:
 
 def scan_dir(dir_path: Path, kind: str, workers: int) -> list[ScanRow]:
     files = sorted(dir_path.glob("*.txt"))
-    log(f"[cyan]Scanning {kind}: {len(files)} files in {dir_path}[/cyan]" if console else f"Scanning {kind}: {len(files)} files")
+    log(
+        f"[cyan]Scanning {kind}: {len(files)} files in {dir_path}[/cyan]"
+        if console
+        else f"Scanning {kind}: {len(files)} files"
+    )
 
     results: list[ScanRow] = []
 
@@ -254,7 +307,11 @@ def scan_dir(dir_path: Path, kind: str, workers: int) -> list[ScanRow]:
             results.append(fut.result())
             done_count += 1
             if done_count % 500 == 0 or done_count == total:
-                log(f"[green]{kind}: scanned {done_count}/{total}[/green]" if console else f"{kind}: scanned {done_count}/{total}")
+                log(
+                    f"[green]{kind}: scanned {done_count}/{total}[/green]"
+                    if console
+                    else f"{kind}: scanned {done_count}/{total}"
+                )
 
     return results
 
@@ -300,6 +357,7 @@ def select_top(
     min_rows: int,
     min_close_fill: float,
     min_volume_fill: float,
+    max_zero_volume_share: float,
 ) -> pd.DataFrame:
     if df.empty:
         return df.copy()
@@ -309,6 +367,7 @@ def select_top(
         & (df["rows"] >= min_rows)
         & (df["close_fill_rate"] >= min_close_fill)
         & (df["volume_fill_rate"] >= min_volume_fill)
+        & (df["zero_volume_share"] <= max_zero_volume_share)
     ].copy()
 
     eligible = eligible.sort_values(
@@ -325,8 +384,7 @@ def select_top(
         ascending=[False, False, False, False, False],
     )
 
-    selected = fallback.head(target_count).copy()
-    return selected
+    return fallback.head(target_count).copy()
 
 
 def save_manifest_txt(path: Path, tickers: list[str]) -> None:
@@ -337,11 +395,14 @@ def save_manifest_txt(path: Path, tickers: list[str]) -> None:
 def main() -> int:
     args = parse_args()
 
+    stock_count, etf_count = resolve_selection_counts(args)
+    selection_name = resolve_selection_name(args, stock_count, etf_count)
+
     repo_root = Path(__file__).resolve().parents[1]
     data_root = (repo_root / args.data_root).resolve()
     stocks_dir = data_root / args.stocks_dir
     etfs_dir = data_root / args.etfs_dir
-    output_dir = (repo_root / args.output_dir).resolve()
+    output_dir = (repo_root / args.output_dir / selection_name).resolve()
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -361,17 +422,19 @@ def main() -> int:
 
     selected_stocks = select_top(
         stocks_df,
-        target_count=args.stock_count,
+        target_count=stock_count,
         min_rows=args.min_rows,
         min_close_fill=args.min_close_fill,
         min_volume_fill=args.min_volume_fill,
+        max_zero_volume_share=args.max_zero_volume_share,
     )
     selected_etfs = select_top(
         etfs_df,
-        target_count=args.etf_count,
+        target_count=etf_count,
         min_rows=args.min_rows,
         min_close_fill=args.min_close_fill,
         min_volume_fill=args.min_volume_fill,
+        max_zero_volume_share=args.max_zero_volume_share,
     )
 
     selected_df = pd.concat([selected_stocks, selected_etfs], ignore_index=True)
@@ -381,6 +444,8 @@ def main() -> int:
     stocks_csv = output_dir / "universe_scan_stocks.csv"
     etfs_csv = output_dir / "universe_scan_etfs.csv"
     selected_csv = output_dir / "selected_files.csv"
+    selected_stocks_csv = output_dir / "selected_stocks.csv"
+    selected_etfs_csv = output_dir / "selected_etfs.csv"
 
     scan_df.to_csv(scan_csv, index=False, encoding="utf-8-sig")
     stocks_df.sort_values(by=["score", "rows"], ascending=[False, False]).to_csv(
@@ -390,6 +455,8 @@ def main() -> int:
         etfs_csv, index=False, encoding="utf-8-sig"
     )
     selected_df.to_csv(selected_csv, index=False, encoding="utf-8-sig")
+    selected_stocks.to_csv(selected_stocks_csv, index=False, encoding="utf-8-sig")
+    selected_etfs.to_csv(selected_etfs_csv, index=False, encoding="utf-8-sig")
 
     stock_tickers = selected_stocks["ticker"].astype(str).tolist()
     etf_tickers = selected_etfs["ticker"].astype(str).tolist()
@@ -400,6 +467,8 @@ def main() -> int:
     save_manifest_txt(output_dir / "selected_all.txt", all_tickers)
 
     summary = {
+        "selection_name": selection_name,
+        "preset": args.preset,
         "data_root": str(data_root),
         "stocks_dir": str(stocks_dir),
         "etfs_dir": str(etfs_dir),
@@ -410,17 +479,20 @@ def main() -> int:
         "etfs_selected": int(len(selected_etfs)),
         "total_selected": int(len(selected_df)),
         "selection_params": {
-            "stock_count": args.stock_count,
-            "etf_count": args.etf_count,
+            "stock_count": stock_count,
+            "etf_count": etf_count,
             "min_rows": args.min_rows,
             "min_close_fill": args.min_close_fill,
             "min_volume_fill": args.min_volume_fill,
+            "max_zero_volume_share": args.max_zero_volume_share,
         },
         "artifacts": {
             "scan_all_csv": str(scan_csv),
             "scan_stocks_csv": str(stocks_csv),
             "scan_etfs_csv": str(etfs_csv),
             "selected_csv": str(selected_csv),
+            "selected_stocks_csv": str(selected_stocks_csv),
+            "selected_etfs_csv": str(selected_etfs_csv),
             "selected_stocks_txt": str(output_dir / "selected_stocks.txt"),
             "selected_etfs_txt": str(output_dir / "selected_etfs.txt"),
             "selected_all_txt": str(output_dir / "selected_all.txt"),
@@ -434,6 +506,8 @@ def main() -> int:
         table = Table(title="Research universe selection summary")
         table.add_column("Metric")
         table.add_column("Value")
+        table.add_row("Preset", str(args.preset))
+        table.add_row("Selection name", str(selection_name))
         table.add_row("Stocks scanned", str(summary["stocks_scanned"]))
         table.add_row("ETFs scanned", str(summary["etfs_scanned"]))
         table.add_row("Stocks selected", str(summary["stocks_selected"]))
@@ -442,7 +516,7 @@ def main() -> int:
         table.add_row("Selected CSV", str(selected_csv))
         console.print(table)
 
-        preview = selected_df[["kind", "ticker", "rows", "end_date", "score"]].head(15).copy()
+        preview = selected_df[["kind", "ticker", "rows", "end_date", "score"]].head(args.preview_limit).copy()
         preview["score"] = preview["score"].round(6)
         preview_table = Table(title="Selection preview")
         for col in preview.columns:
@@ -453,7 +527,11 @@ def main() -> int:
     else:
         print(json.dumps(summary, indent=2, ensure_ascii=False))
 
-    log(f"[bold green]Done.[/bold green] Selection artifacts saved to: {output_dir}" if console else f"Done. Saved to {output_dir}")
+    log(
+        f"[bold green]Done.[/bold green] Selection artifacts saved to: {output_dir}"
+        if console
+        else f"Done. Saved to {output_dir}"
+    )
     return 0
 
 

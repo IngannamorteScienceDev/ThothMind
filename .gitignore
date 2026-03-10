@@ -64,3 +64,4 @@ pip-delete-this-directory.txt
 /reports
 /data_curated
 /configs/_batch_tmp
+/data_curated_demo_30s_10e

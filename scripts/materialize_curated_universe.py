@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import argparse
@@ -29,28 +30,87 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--selected-csv",
-        default="reports/universe_selection/selected_files.csv",
-        help="CSV produced by select_research_universe.py",
+        default="",
+        help="CSV produced by select_research_universe.py. If omitted, resolved from --selection-name.",
+    )
+    parser.add_argument(
+        "--selection-root",
+        default="reports/universe_selection",
+        help="Base folder where selection subfolders are stored.",
+    )
+    parser.add_argument(
+        "--selection-name",
+        default="",
+        help="Selection subfolder name produced by select_research_universe.py.",
     )
     parser.add_argument(
         "--output-root",
         default="data_curated",
-        help="Destination root for curated data",
+        help="Destination root for curated data. If --selection-name is set and this stays default, the name is appended.",
+    )
+    parser.add_argument(
+        "--copy-mode",
+        choices=["copy", "hardlink"],
+        default="copy",
+        help="How files should be materialized into the curated folder.",
     )
     parser.add_argument(
         "--clean",
         action="store_true",
         help="Delete destination folder before copying",
     )
+    parser.add_argument(
+        "--strict-missing",
+        action="store_true",
+        help="Fail if any selected source file is missing.",
+    )
     return parser.parse_args()
+
+
+def resolve_selected_csv(repo_root: Path, args: argparse.Namespace) -> tuple[Path, str]:
+    selection_name = str(args.selection_name).strip()
+
+    if str(args.selected_csv).strip():
+        selected_csv = (repo_root / args.selected_csv).resolve()
+        if not selection_name:
+            parent_name = selected_csv.parent.name
+            selection_name = parent_name if parent_name != "universe_selection" else ""
+        return selected_csv, selection_name
+
+    if not selection_name:
+        raise ValueError("Either --selected-csv or --selection-name must be provided.")
+
+    selected_csv = (repo_root / args.selection_root / selection_name / "selected_files.csv").resolve()
+    return selected_csv, selection_name
+
+
+def resolve_output_root(repo_root: Path, args: argparse.Namespace, selection_name: str) -> Path:
+    output_root = str(args.output_root).strip()
+    if selection_name and output_root == "data_curated":
+        return (repo_root / f"data_curated_{selection_name}").resolve()
+    return (repo_root / output_root).resolve()
+
+
+def materialize_file(src: Path, dst: Path, copy_mode: str) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if copy_mode == "hardlink":
+        try:
+            if dst.exists():
+                dst.unlink()
+            dst.hardlink_to(src)
+            return
+        except Exception:
+            shutil.copy2(src, dst)
+            return
+    shutil.copy2(src, dst)
 
 
 def main() -> int:
     args = parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
-    selected_csv = (repo_root / args.selected_csv).resolve()
-    output_root = (repo_root / args.output_root).resolve()
+    selected_csv, selection_name = resolve_selected_csv(repo_root, args)
+    output_root = resolve_output_root(repo_root, args, selection_name)
 
     if not selected_csv.exists():
         raise FileNotFoundError(f"Selected CSV not found: {selected_csv}")
@@ -62,7 +122,11 @@ def main() -> int:
         raise ValueError(f"Selected CSV is missing columns: {sorted(missing)}")
 
     if args.clean and output_root.exists():
-        log(f"[yellow]Removing existing curated folder: {output_root}[/yellow]" if console else f"Removing {output_root}")
+        log(
+            f"[yellow]Removing existing curated folder: {output_root}[/yellow]"
+            if console
+            else f"Removing {output_root}"
+        )
         shutil.rmtree(output_root)
 
     stocks_out = output_root / "Stocks"
@@ -71,7 +135,7 @@ def main() -> int:
     etfs_out.mkdir(parents=True, exist_ok=True)
 
     copied = 0
-    missing_files = []
+    missing_files: list[str] = []
 
     for _, row in df.iterrows():
         kind = str(row["kind"]).strip().lower()
@@ -91,8 +155,13 @@ def main() -> int:
             missing_files.append(str(src))
             continue
 
-        shutil.copy2(src, dst)
+        materialize_file(src, dst, args.copy_mode)
         copied += 1
+
+    if missing_files and args.strict_missing:
+        raise FileNotFoundError(
+            f"{len(missing_files)} selected source files were not found. First missing: {missing_files[0]}"
+        )
 
     selected_stocks = df[df["kind"].astype(str).str.lower() == "stock"]["ticker"].astype(str).tolist()
     selected_etfs = df[df["kind"].astype(str).str.lower() == "etf"]["ticker"].astype(str).tolist()
@@ -103,8 +172,10 @@ def main() -> int:
     (output_root / "selected_all.txt").write_text("\n".join(selected_all) + "\n", encoding="utf-8")
 
     manifest = {
+        "selection_name": selection_name,
         "selected_csv": str(selected_csv),
         "output_root": str(output_root),
+        "copy_mode": args.copy_mode,
         "stocks_count": len(selected_stocks),
         "etfs_count": len(selected_etfs),
         "total_expected": len(df),
@@ -120,7 +191,9 @@ def main() -> int:
         table = Table(title="Curated universe materialization summary")
         table.add_column("Metric")
         table.add_column("Value")
+        table.add_row("Selection name", str(selection_name or "-"))
         table.add_row("Output root", str(output_root))
+        table.add_row("Copy mode", str(args.copy_mode))
         table.add_row("Stocks copied", str(len(selected_stocks)))
         table.add_row("ETFs copied", str(len(selected_etfs)))
         table.add_row("Total copied", str(copied))
@@ -130,7 +203,11 @@ def main() -> int:
     else:
         print(json.dumps(manifest, indent=2, ensure_ascii=False))
 
-    log(f"[bold green]Done.[/bold green] Curated universe created at: {output_root}" if console else f"Done. Created {output_root}")
+    log(
+        f"[bold green]Done.[/bold green] Curated universe created at: {output_root}"
+        if console
+        else f"Done. Created {output_root}"
+    )
     return 0
 
 
