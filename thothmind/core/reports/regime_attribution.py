@@ -148,11 +148,12 @@ def _summary_by_regime(sim_df: pd.DataFrame, regimes: pd.DataFrame, variant: str
     )
 
     # sharpe (daily)
-    out["sharpe"] = np.where(
-        out["vol_net_ret"].to_numpy(dtype=float) > 1e-12,
-        np.sqrt(252.0) * (out["mean_net_ret"].to_numpy(dtype=float) / out["vol_net_ret"].to_numpy(dtype=float)),
-        np.nan,
-    )
+    mean_arr = out["mean_net_ret"].to_numpy(dtype=float)
+    vol_arr = out["vol_net_ret"].to_numpy(dtype=float)
+    sharpe_arr = np.full_like(mean_arr, np.nan, dtype=float)
+    valid = vol_arr > 1e-12
+    sharpe_arr[valid] = np.sqrt(252.0) * np.divide(mean_arr[valid], vol_arr[valid])
+    out["sharpe"] = sharpe_arr
 
     out["total_rel_return"] = np.expm1(out["sum_log_ret"].to_numpy(dtype=float))
 

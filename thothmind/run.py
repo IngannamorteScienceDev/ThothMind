@@ -151,6 +151,28 @@ def _read_allocation_cfg(cfg: Dict[str, Any]) -> Dict[str, Any] | None:
     return None
 
 
+def _read_decision_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Read decision-layer config.
+
+    Priority:
+      1) explicit decision: {...}
+      2) soft fallback from allocation: {...} for backward compatibility
+    """
+    decision_cfg = dict(cfg.get("decision", {}) or {})
+    allocation_cfg = _read_allocation_cfg(cfg)
+    if allocation_cfg:
+        if "min_hold_bars" not in decision_cfg and "min_hold_days" in allocation_cfg:
+            decision_cfg["min_hold_bars"] = int(allocation_cfg["min_hold_days"])
+        if "max_position" not in decision_cfg and "high_exposure" in allocation_cfg:
+            decision_cfg["max_position"] = float(allocation_cfg["high_exposure"])
+        if "min_position" not in decision_cfg and "low_exposure" in allocation_cfg:
+            decision_cfg["min_position"] = float(allocation_cfg["low_exposure"])
+        if "confidence_floor" not in decision_cfg and "mid_exposure" in allocation_cfg:
+            decision_cfg["confidence_floor"] = max(0.25, min(float(allocation_cfg["mid_exposure"]), 1.0))
+    return decision_cfg
+
+
 def run_experiment(config_path: str) -> str:
     cfg = load_config(config_path)
 
@@ -412,19 +434,18 @@ def run_experiment(config_path: str) -> str:
             )
 
             model_cfg = cfg.get("model", {}) or {}
-            decision_cfg = cfg.get("decision", {}) or {}
+            decision_cfg = _read_decision_cfg(cfg)
 
             kwargs = dict(
                 df_feat=df_feat,
                 feature_cols=feature_cols,
-                splits=splits,
                 model_cfg=model_cfg,
                 decision_cfg=decision_cfg,
-                commission_bps=commission_bps,
-                slippage_bps=slippage_bps,
-                slippage_vol_k=slippage_vol_k,
-                initial_equity=initial_equity,
-                execution_lag=execution_lag,
+                walkforward_cfg=wf_cfg,
+                costs_cfg=cfg.get("costs", {}) or {},
+                sim_cfg=cfg.get("sim", {}) or {},
+                features_cfg=cfg.get("features", {}) or {},
+                splits=splits,
             )
             sim_oos_df, window_metrics_df, preds_oos_df, signals_oos_df, run_metrics = _call_with_costs_adapter(
                 run_walkforward_ml_oos, kwargs, costs
@@ -473,19 +494,20 @@ def run_experiment(config_path: str) -> str:
             model_cfg = cfg.get("model", {}) or {}
             conformal_cfg = cfg.get("conformal", {"alpha": 0.10}) or {"alpha": 0.10}
             allocation_cfg = _read_allocation_cfg(cfg)
+            decision_cfg = _read_decision_cfg(cfg)
 
             kwargs = dict(
                 df_feat=df_feat,
                 feature_cols=feature_cols,
-                splits=splits,
                 model_cfg=model_cfg,
                 conformal_cfg=conformal_cfg,
                 allocation_cfg=allocation_cfg,
-                commission_bps=commission_bps,
-                slippage_bps=slippage_bps,
-                slippage_vol_k=slippage_vol_k,
-                initial_equity=initial_equity,
-                execution_lag=execution_lag,
+                decision_cfg=decision_cfg,
+                walkforward_cfg=wf_cfg,
+                costs_cfg=cfg.get("costs", {}) or {},
+                sim_cfg=cfg.get("sim", {}) or {},
+                features_cfg=cfg.get("features", {}) or {},
+                splits=splits,
             )
             sim_oos_df, window_metrics_df, preds_oos_df, signals_oos_df, run_metrics = _call_with_costs_adapter(
                 run_walkforward_ml_conformal_oos, kwargs, costs
@@ -535,19 +557,20 @@ def run_experiment(config_path: str) -> str:
             model_cfg = cfg.get("model", {}) or {}
             conformal_cfg = cfg.get("conformal", {"alpha": 0.10}) or {"alpha": 0.10}
             allocation_cfg = _read_allocation_cfg(cfg)
+            decision_cfg = _read_decision_cfg(cfg)
 
             kwargs_strat = dict(
                 df_feat=df_feat,
                 feature_cols=feature_cols,
-                splits=splits,
                 model_cfg=model_cfg,
                 conformal_cfg=conformal_cfg,
                 allocation_cfg=allocation_cfg,
-                commission_bps=commission_bps,
-                slippage_bps=slippage_bps,
-                slippage_vol_k=slippage_vol_k,
-                initial_equity=initial_equity,
-                execution_lag=execution_lag,
+                decision_cfg=decision_cfg,
+                walkforward_cfg=wf_cfg,
+                costs_cfg=cfg.get("costs", {}) or {},
+                sim_cfg=cfg.get("sim", {}) or {},
+                features_cfg=cfg.get("features", {}) or {},
+                splits=splits,
             )
             sim_oos_strat, window_metrics_strat, preds_oos, sig_oos, run_metrics_strat = _call_with_costs_adapter(
                 run_walkforward_ml_conformal_oos, kwargs_strat, costs

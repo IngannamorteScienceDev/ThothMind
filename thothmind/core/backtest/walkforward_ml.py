@@ -55,7 +55,6 @@ def _infer_target_col(
         return explicit_target_col
 
     candidates: list[str] = []
-
     if explicit_target_col:
         candidates.append(explicit_target_col)
 
@@ -119,10 +118,7 @@ def _infer_target_col(
             continue
         if not pd.api.types.is_numeric_dtype(df[c]):
             continue
-        if any(tok in lc for tok in ["target", "label", "future", "forward", "fwd", "next"]) or lc in {
-            "y",
-            "y_reg",
-        }:
+        if any(tok in lc for tok in ["target", "label", "future", "forward", "fwd", "next"]) or lc in {"y", "y_reg"}:
             heuristic_candidates.append(c)
 
     if heuristic_candidates:
@@ -145,6 +141,8 @@ def _infer_feature_cols(df: pd.DataFrame, target_col: str) -> list[str]:
         "gross_ret",
         "net_ret",
         "total_cost",
+        "decision_",
+        "execution_",
     )
     forbidden_exact = {
         "date",
@@ -196,6 +194,37 @@ def _generate_walkforward_slices(
     return slices
 
 
+def _normalize_splits(
+    n_rows: int,
+    *,
+    splits: list[Any] | None,
+    walkforward_cfg: dict[str, Any] | None,
+    step_override: int | None,
+) -> list[tuple[int, int, int, int]]:
+    if splits:
+        norm: list[tuple[int, int, int, int]] = []
+        for sp in splits:
+            if isinstance(sp, dict):
+                norm.append(
+                    (
+                        int(sp["train_start"]),
+                        int(sp["train_end"]) + 1,
+                        int(sp["test_start"]),
+                        int(sp["test_end"]) + 1,
+                    )
+                )
+            else:
+                tr_s, tr_e, te_s, te_e = sp
+                norm.append((int(tr_s), int(tr_e), int(te_s), int(te_e)))
+        return norm
+
+    wf = dict(walkforward_cfg or {})
+    train_size = int(wf.get("train_size", 756))
+    test_size = int(wf.get("test_size", 63))
+    step = int(step_override if step_override is not None else wf.get("step", test_size))
+    return _generate_walkforward_slices(len(range(n_rows)), train_size=train_size, test_size=test_size, step=step)
+
+
 def _build_xgb(model_cfg: dict[str, Any] | None) -> XGBRegressor:
     cfg = dict(model_cfg or {})
     xgb_params = cfg.pop("xgb_params", {}) if isinstance(cfg.get("xgb_params"), dict) else {}
@@ -223,11 +252,11 @@ def _build_policy(decision_cfg: dict[str, Any] | None, sim_cfg: dict[str, Any] |
         enter_quantile=float(d.get("enter_quantile", 0.70)),
         exit_quantile=float(d.get("exit_quantile", 0.45)),
         edge_buffer_bps=float(d.get("edge_buffer_bps", 5.0)),
-        min_hold_bars=int(d.get("min_hold_bars", 5)),
+        min_hold_bars=int(d.get("min_hold_bars", d.get("min_hold_days", 5))),
         cooldown_bars=int(d.get("cooldown_bars", 3)),
         trend_sma_window=int(d.get("trend_sma_window", 200)),
         use_trend_filter=bool(d.get("use_trend_filter", True)),
-        block_regimes=tuple(d.get("block_regimes", ["Bear_HighVol"])),
+        block_regimes=tuple(d.get("block_regimes", ["bear_high_vol"])),
         vol_target_annual=float(d.get("vol_target_annual", 0.18)),
         vol_lookback=int(d.get("vol_lookback", 20)),
         max_position=float(d.get("max_position", 1.0)),
@@ -235,6 +264,7 @@ def _build_policy(decision_cfg: dict[str, Any] | None, sim_cfg: dict[str, Any] |
         confidence_floor=float(d.get("confidence_floor", 0.25)),
         confidence_cap=float(d.get("confidence_cap", 1.0)),
         execution_lag=int(s.get("execution_lag", 1)),
+        lower_bound_required=bool(d.get("lower_bound_required", False)),
     )
 
 
@@ -249,20 +279,58 @@ def _run_metrics_from_sim(sim_oos: pd.DataFrame) -> dict[str, Any]:
     metrics["sharpe"] = float(metrics.get("sharpe", 0.0))
     metrics["max_drawdown"] = float(metrics.get("max_drawdown", 0.0))
     metrics["max_drawdown_pct"] = metrics["max_drawdown"] * 100.0
-    metrics["mean_net_ret"] = (
-        float(pd.to_numeric(sim_oos["net_ret"], errors="coerce").mean()) if not sim_oos.empty else 0.0
-    )
-    metrics["avg_exposure"] = (
-        float(pd.to_numeric(sim_oos["position"], errors="coerce").mean()) if "position" in sim_oos.columns else 0.0
-    )
-    metrics["avg_turnover"] = (
-        float(pd.to_numeric(sim_oos["turnover"], errors="coerce").mean()) if "turnover" in sim_oos.columns else 0.0
-    )
-    metrics["total_cost_sum"] = (
-        float(pd.to_numeric(sim_oos["total_cost"], errors="coerce").sum()) if "total_cost" in sim_oos.columns else 0.0
-    )
+    metrics["mean_net_ret"] = float(pd.to_numeric(sim_oos["net_ret"], errors="coerce").mean()) if not sim_oos.empty else 0.0
+    metrics["avg_exposure"] = float(pd.to_numeric(sim_oos["position"], errors="coerce").mean()) if "position" in sim_oos.columns else 0.0
+    metrics["avg_turnover"] = float(pd.to_numeric(sim_oos["turnover"], errors="coerce").mean()) if "turnover" in sim_oos.columns else 0.0
+    metrics["total_cost_sum"] = float(pd.to_numeric(sim_oos["total_cost"], errors="coerce").sum()) if "total_cost" in sim_oos.columns else 0.0
     metrics["n_days"] = int(len(sim_oos))
     return metrics
+
+
+def _resolve_runtime_configs(
+    *,
+    walkforward_cfg: dict[str, Any] | None,
+    costs_cfg: dict[str, Any] | None,
+    sim_cfg: dict[str, Any] | None,
+    features_cfg: dict[str, Any] | None,
+    splits: list[Any] | None,
+    commission_bps: float | None,
+    slippage_k: float | None,
+    slippage_bps: float | None,
+    slippage_vol_k: float | None,
+    initial_equity: float | None,
+    execution_lag: int | None,
+    step: int | None,
+    n_rows: int,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], list[tuple[int, int, int, int]]]:
+    wf = dict(walkforward_cfg or {})
+    costs = dict(costs_cfg or {})
+    sim = dict(sim_cfg or {})
+    features = dict(features_cfg or {})
+
+    if commission_bps is not None:
+        costs["commission_bps"] = commission_bps
+    if slippage_k is not None:
+        costs["slippage_k"] = slippage_k
+    if "slippage_k" not in costs:
+        # Fallback for newer cost schema used by run.py and suite runner.
+        costs["slippage_k"] = 0.15
+        if slippage_bps is not None:
+            costs["slippage_k"] = max(float(costs["slippage_k"]), float(slippage_bps) / 10.0)
+        elif "slippage_bps" in costs:
+            costs["slippage_k"] = max(float(costs["slippage_k"]), float(costs["slippage_bps"]) / 10.0)
+        if slippage_vol_k is not None:
+            costs["slippage_k"] = max(float(costs["slippage_k"]), min(float(slippage_vol_k) * 0.015, 0.5))
+        elif "slippage_vol_k" in costs:
+            costs["slippage_k"] = max(float(costs["slippage_k"]), min(float(costs["slippage_vol_k"]) * 0.015, 0.5))
+
+    if initial_equity is not None:
+        sim["initial_equity"] = initial_equity
+    if execution_lag is not None:
+        sim["execution_lag"] = execution_lag
+
+    resolved_splits = _normalize_splits(n_rows, splits=splits, walkforward_cfg=wf, step_override=step)
+    return wf, costs, sim, features, resolved_splits
 
 
 def run_walkforward_ml_oos(
@@ -281,25 +349,34 @@ def run_walkforward_ml_oos(
     y_col: str | None = None,
     horizon: int | None = None,
     step: int | None = None,
+    splits: list[Any] | None = None,
+    commission_bps: float | None = None,
+    slippage_k: float | None = None,
+    slippage_bps: float | None = None,
+    slippage_vol_k: float | None = None,
+    initial_equity: float | None = None,
+    execution_lag: int | None = None,
     **_: Any,
 ) -> WalkforwardResult:
-    """
-    ML walk-forward with stronger policy layer:
-    - dynamic thresholds from train-window prediction distribution
-    - trend filter
-    - volatility targeting
-    - hysteresis
-    """
     if df_feat is None or df_feat.empty:
         raise ValueError("df_feat is empty; walk-forward ML cannot run.")
 
-    wf = dict(walkforward_cfg or {})
-    costs = dict(costs_cfg or {})
-    sim = dict(sim_cfg or {})
+    wf, costs, sim, features_cfg, resolved_splits = _resolve_runtime_configs(
+        walkforward_cfg=walkforward_cfg,
+        costs_cfg=costs_cfg,
+        sim_cfg=sim_cfg,
+        features_cfg=features_cfg,
+        splits=splits,
+        commission_bps=commission_bps,
+        slippage_k=slippage_k,
+        slippage_bps=slippage_bps,
+        slippage_vol_k=slippage_vol_k,
+        initial_equity=initial_equity,
+        execution_lag=execution_lag,
+        step=step,
+        n_rows=len(df_feat),
+    )
 
-    train_size = int(wf.get("train_size", 756))
-    test_size = int(wf.get("test_size", 63))
-    step = int(step if step is not None else wf.get("step", test_size))
     initial_equity = float(sim.get("initial_equity", 1.0))
     commission_bps = float(costs.get("commission_bps", 2.0))
     slippage_k = float(costs.get("slippage_k", 0.15))
@@ -307,17 +384,9 @@ def run_walkforward_ml_oos(
     df = df_feat.copy().sort_values("date").reset_index(drop=True)
     explicit_target = target_col or target_column or label_col or y_col
 
-    cfg_horizon = None
-    if horizon is not None:
-        cfg_horizon = int(horizon)
-    elif isinstance(features_cfg, dict) and features_cfg.get("horizon") is not None:
-        cfg_horizon = int(features_cfg["horizon"])
+    cfg_horizon = int(horizon) if horizon is not None else (int(features_cfg["horizon"]) if features_cfg.get("horizon") is not None else None)
 
-    target_col = _infer_target_col(
-        df,
-        explicit_target_col=explicit_target,
-        horizon=cfg_horizon,
-    )
+    target_col = _infer_target_col(df, explicit_target_col=explicit_target, horizon=cfg_horizon)
     ret_col = resolve_return_col(df)
 
     if feature_cols is None:
@@ -325,31 +394,22 @@ def run_walkforward_ml_oos(
     else:
         feature_cols = [c for c in feature_cols if c in df.columns]
 
-    slices = _generate_walkforward_slices(
-        len(df),
-        train_size=train_size,
-        test_size=test_size,
-        step=step,
-    )
-    if not slices:
+    if not resolved_splits:
         raise ValueError("No walk-forward slices could be built. Check train/test/step sizes.")
 
-    policy = _build_policy(decision_cfg, sim_cfg)
+    policy = _build_policy(decision_cfg, sim)
 
     pred_parts: list[pd.DataFrame] = []
-    sig_parts: list[pd.DataFrame] = []
     sim_parts: list[pd.DataFrame] = []
     win_rows: list[dict[str, Any]] = []
-
     rolling_equity = initial_equity
 
-    for window_id, (tr_s, tr_e, te_s, te_e) in enumerate(slices, start=1):
+    for window_id, (tr_s, tr_e, te_s, te_e) in enumerate(resolved_splits, start=1):
         train_df = df.iloc[tr_s:tr_e].copy()
         test_df = df.iloc[te_s:te_e].copy()
 
         X_train = train_df[feature_cols].astype(float)
         y_train = pd.to_numeric(train_df[target_col], errors="coerce").astype(float)
-
         X_test = test_df[feature_cols].astype(float)
         y_test = pd.to_numeric(test_df[target_col], errors="coerce").astype(float)
 
@@ -372,7 +432,6 @@ def run_walkforward_ml_oos(
         pred_span["window_id"] = window_id
         pred_span["pred"] = test_pred
         pred_span["y_true"] = y_test.to_numpy()
-        pred_span["target_col_name"] = target_col
 
         pred_parts.append(
             pred_span[
@@ -392,18 +451,12 @@ def run_walkforward_ml_oos(
             policy=policy,
         )
         sig_span["window_id"] = window_id
-        sig_parts.append(sig_span.copy())
 
         sim_span = attach_equity_curve(sig_span, initial_equity=rolling_equity)
         sim_span["window_id"] = window_id
         sim_parts.append(sim_span.copy())
 
-        window_metrics = compute_performance_metrics(
-            sim_span["net_ret"],
-            periods_per_year=252,
-            enforce_returns_input=True,
-        )
-
+        window_metrics = compute_performance_metrics(sim_span["net_ret"], periods_per_year=252, enforce_returns_input=True)
         win_rows.append(
             {
                 "window_id": window_id,
@@ -419,25 +472,19 @@ def run_walkforward_ml_oos(
                 "exit_threshold": float(exit_thr),
                 "mean_pred_test": float(np.mean(test_pred)),
                 "median_pred_test": float(np.median(test_pred)),
-                "trades": int(sig_span["signal"].sum()),
+                "trades": int(sig_span.get("execution_entry_signal", sig_span["signal"]).sum()),
                 "avg_exposure": float(sig_span["position"].mean()),
                 "window_total_return": float(sim_span["equity"].iloc[-1] / rolling_equity - 1.0),
                 "window_sharpe": float(window_metrics.get("sharpe", 0.0)),
                 "window_max_drawdown": float(window_metrics.get("max_drawdown", 0.0)),
             }
         )
-
         rolling_equity = float(sim_span["equity"].iloc[-1])
 
     predictions_oos = pd.concat(pred_parts, ignore_index=True).sort_values("date").reset_index(drop=True)
     sim_oos = pd.concat(sim_parts, ignore_index=True).sort_values("date").reset_index(drop=True)
-
-    # Backward-compatible contract:
-    # older run.py/reporting code expects signals_oos to already contain equity/drawdown/net_ret columns
     signals_oos = sim_oos.copy()
-
     window_metrics_df = pd.DataFrame(win_rows)
-
     run_metrics = _run_metrics_from_sim(sim_oos)
 
     return WalkforwardResult(

@@ -39,8 +39,21 @@ model:
   min_child_weight: 1.0
 
 decision:
-  thr_half: 0.0
-  thr_full: 0.001
+  enter_quantile: 0.70
+  exit_quantile: 0.45
+  edge_buffer_bps: 5.0
+  min_hold_bars: 5
+  cooldown_bars: 3
+  trend_sma_window: 200
+  use_trend_filter: true
+  block_regimes: ["bear_high_vol"]
+  vol_target_annual: 0.18
+  vol_lookback: 20
+  max_position: 1.0
+  min_position: 0.0
+  confidence_floor: 0.25
+  confidence_cap: 1.0
+  lower_bound_required: false
 
 costs:
   commission_bps: 2.0

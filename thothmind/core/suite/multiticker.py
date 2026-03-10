@@ -14,11 +14,7 @@ from thothmind.core.backtest.walkforward import run_walkforward_oos
 from thothmind.core.backtest.walkforward_ml_conformal import run_walkforward_ml_conformal_oos
 from thothmind.core.features.pipeline import infer_feature_columns
 from thothmind.core.pipeline_m1 import build_df_feat
-from thothmind.core.reports.plots import (
-    plot_bootstrap_distribution,
-    plot_drawdown,
-    plot_equity,
-)
+from thothmind.core.reports.plots import plot_bootstrap_distribution, plot_drawdown, plot_equity
 from thothmind.core.reports.regime_attribution import build_regime_attribution_report
 from thothmind.core.reports.suite_regime import build_suite_regime_summary
 from thothmind.core.splits.walkforward import generate_walkforward_splits
@@ -71,7 +67,7 @@ def _compute_sim_stats(sim: pd.DataFrame) -> Dict[str, float]:
         "n_days": int(len(df)),
         "last_equity": float(eq.iloc[-1]),
         "mean_net_ret": _mean("net_ret"),
-        "avg_exposure": _mean("exposure"),
+        "avg_exposure": _mean("position") if "position" in df.columns else _mean("exposure"),
         "avg_turnover": _mean("turnover"),
         "total_cost_sum": _sum("total_cost"),
         "worst_drawdown": float(dd.min()),
@@ -94,23 +90,24 @@ def _read_allocation_cfg(cfg: dict) -> dict | None:
     return None
 
 
+def _read_decision_cfg(cfg: dict) -> dict:
+    decision_cfg = dict(cfg.get("decision", {}) or {})
+    allocation_cfg = _read_allocation_cfg(cfg)
+    if allocation_cfg:
+        if "min_hold_bars" not in decision_cfg and "min_hold_days" in allocation_cfg:
+            decision_cfg["min_hold_bars"] = int(allocation_cfg["min_hold_days"])
+        if "max_position" not in decision_cfg and "high_exposure" in allocation_cfg:
+            decision_cfg["max_position"] = float(allocation_cfg["high_exposure"])
+        if "min_position" not in decision_cfg and "low_exposure" in allocation_cfg:
+            decision_cfg["min_position"] = float(allocation_cfg["low_exposure"])
+        if "confidence_floor" not in decision_cfg and "mid_exposure" in allocation_cfg:
+            decision_cfg["confidence_floor"] = max(0.25, min(float(allocation_cfg["mid_exposure"]), 1.0))
+    return decision_cfg
+
+
 def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
     """
     Milestone 8: multi-ticker suite.
-
-    For each ticker we run:
-      - m1 (df_feat + snapshot)
-      - WF strategy (ML + conformal intervals + allocation)
-      - WF buy&hold under same protocol
-      - Milestone 9 report: regime attribution by bull/bear × high/low vol
-      - moving-block bootstrap significance (strategy vs buy&hold)
-
-    Writes per-ticker artifacts into:
-      reports/runs/<run_id>/tickers/<TICKER>/...
-
-    And suite-level artifacts:
-      reports/runs/<run_id>/suite_summary.csv
-      reports/runs/<run_id>/suite_regime/suite_regime_summary.csv + plots
     """
     log = logging.getLogger("thothmind")
 
@@ -129,6 +126,7 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
     model_cfg = cfg.get("model", {}) or {}
     conformal_cfg = cfg.get("conformal", {"alpha": 0.10}) or {"alpha": 0.10}
     allocation_cfg = _read_allocation_cfg(cfg)
+    decision_cfg = _read_decision_cfg(cfg)
 
     boot_cfg = cfg.get("bootstrap", {}) or {}
     n_boot = int(boot_cfg.get("n_boot", 2000))
@@ -169,13 +167,11 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
             save_json(ticker_cfg, ticker_dir / "config_ticker.json")
 
             try:
-                # 1) df_feat
                 df_feat, snapshot = build_df_feat(ticker_cfg)
                 df_feat.to_csv(ticker_dir / "df_feat.csv", index=False)
                 save_json(snapshot, ticker_dir / "data_snapshot.json")
                 p.advance(s_task, 1)
 
-                # splits
                 feature_cols = infer_feature_columns(df_feat)
                 splits = generate_walkforward_splits(
                     n_rows=len(df_feat),
@@ -184,22 +180,19 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
                     step=step,
                 )
 
-                # 2) strategy
                 p.update(s_task, description=f"{ticker} • WF strategy")
-                sim_oos_strat, window_metrics_strat, preds_oos, sig_oos, run_metrics_strat = (
-                    run_walkforward_ml_conformal_oos(
-                        df_feat=df_feat,
-                        feature_cols=feature_cols,
-                        splits=splits,
-                        model_cfg=model_cfg,
-                        conformal_cfg=conformal_cfg,
-                        allocation_cfg=allocation_cfg,
-                        commission_bps=commission_bps,
-                        slippage_bps=slippage_bps,
-                        slippage_vol_k=slippage_vol_k,
-                        initial_equity=initial_equity,
-                        execution_lag=execution_lag,
-                    )
+                sim_oos_strat, window_metrics_strat, preds_oos, sig_oos, run_metrics_strat = run_walkforward_ml_conformal_oos(
+                    df_feat=df_feat,
+                    feature_cols=feature_cols,
+                    model_cfg=model_cfg,
+                    conformal_cfg=conformal_cfg,
+                    allocation_cfg=allocation_cfg,
+                    decision_cfg=decision_cfg,
+                    walkforward_cfg=wf_cfg,
+                    costs_cfg=costs,
+                    sim_cfg=sim_cfg,
+                    features_cfg=cfg.get("features", {}) or {},
+                    splits=splits,
                 )
 
                 preds_oos.to_csv(ticker_dir / "predictions_oos.csv", index=False)
@@ -212,7 +205,6 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
                 plot_drawdown(sim_oos_strat, ticker_dir / "plots" / "wf_drawdown.png")
                 p.advance(s_task, 1)
 
-                # 3) buy&hold
                 p.update(s_task, description=f"{ticker} • WF buy&hold")
                 bh_policy = BuyHoldPolicy()
                 bh_signals_full = bh_policy.compute_signals(df_feat)
@@ -231,7 +223,6 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
                 save_json(bh_metrics, ticker_dir / "run_metrics_buyhold.json")
                 p.advance(s_task, 1)
 
-                # 4) per-ticker regimes
                 p.update(s_task, description=f"{ticker} • regimes")
                 if regime_report:
                     build_regime_attribution_report(
@@ -242,7 +233,6 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
                     )
                 p.advance(s_task, 1)
 
-                # 5) bootstrap
                 p.update(s_task, description=f"{ticker} • bootstrap")
                 sig_summary, boot_df = bootstrap_oos_outperformance(
                     sim_strategy=sim_oos_strat,
@@ -256,7 +246,6 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
 
                 save_json(sig_summary, ticker_dir / "oos_significance.json")
                 boot_df.to_csv(ticker_dir / "bootstrap_samples.csv", index=False)
-
                 plot_bootstrap_distribution(
                     values=boot_df["boot_rel_return"].to_numpy(),
                     actual_value=float(sig_summary["actual_rel_return"]),
@@ -267,7 +256,6 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
 
                 s_stats = _compute_sim_stats(sim_oos_strat)
                 b_stats = _compute_sim_stats(sim_oos_bh)
-
                 row = {
                     "ticker": str(ticker),
                     "status": "ok",
@@ -296,32 +284,24 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
                     "ci_rel_return_high": float(sig_summary.get("ci_rel_return_high", np.nan)),
                 }
                 summary_rows.append(row)
-
-                log.info(
-                    f"[m8] {ticker}: done (rel_return={row['actual_rel_return']:.4f}, p={row['p_value_one_sided']:.4f})"
-                )
+                log.info(f"[m8] {ticker}: done (rel_return={row['actual_rel_return']:.4f}, p={row['p_value_one_sided']:.4f})")
 
             except Exception as e:
                 console.print(f"[red]{ticker} failed:[/] {e}")
                 summary_rows.append({"ticker": str(ticker), "status": "error", "error": str(e)})
 
-            # hide step bar between tickers (clean output)
             p.update(s_task, visible=False)
             p.advance(t_task, 1)
 
-    # --- Suite summary (after ALL tickers) ---
     summary_df = pd.DataFrame(summary_rows)
     if not summary_df.empty and {"ticker", "status"}.issubset(summary_df.columns):
         rank = {"ok": 0, "error": 1}
         summary_df["_status_rank"] = summary_df["status"].map(rank).fillna(9)
-        summary_df = summary_df.sort_values(["_status_rank", "ticker"], ascending=[True, True]).drop(
-            columns=["_status_rank"]
-        )
+        summary_df = summary_df.sort_values(["_status_rank", "ticker"], ascending=[True, True]).drop(columns=["_status_rank"])
 
     summary_df.to_csv(run_dir / "suite_summary.csv", index=False)
     log.info(f"[m8] saved suite_summary.csv for {len(summary_df)} tickers")
 
-    # --- Suite regime aggregation (after ALL per-ticker regime reports exist) ---
     if regime_report:
         try:
             suite_reg_dir = run_dir / "suite_regime"
@@ -333,6 +313,5 @@ def run_multiticker_suite(cfg: dict, run_dir: Path) -> pd.DataFrame:
     return summary_df
 
 
-# Backward-compat re-export (older code might import bootstrap from this module)
 def bootstrap_oos_outperformance_legacy(*args, **kwargs) -> Tuple[Dict[str, Any], pd.DataFrame]:
     return bootstrap_oos_outperformance(*args, **kwargs)

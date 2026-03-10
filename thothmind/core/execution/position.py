@@ -16,7 +16,7 @@ class PositionPolicyConfig:
     cooldown_bars: int = 3
     trend_sma_window: int = 200
     use_trend_filter: bool = True
-    block_regimes: tuple[str, ...] = ("Bear_HighVol",)
+    block_regimes: tuple[str, ...] = ("bear_high_vol",)
     vol_target_annual: float = 0.18
     vol_lookback: int = 20
     max_position: float = 1.0
@@ -24,6 +24,7 @@ class PositionPolicyConfig:
     confidence_floor: float = 0.25
     confidence_cap: float = 1.00
     execution_lag: int = 1
+    lower_bound_required: bool = True
 
 
 def _first_existing_col(df: pd.DataFrame, names: Iterable[str]) -> str | None:
@@ -38,6 +39,20 @@ def _first_existing_col(df: pd.DataFrame, names: Iterable[str]) -> str | None:
 
 def _coerce_numeric(series: pd.Series, fill: float = 0.0) -> pd.Series:
     return pd.to_numeric(series, errors="coerce").fillna(fill).astype(float)
+
+
+def _normalize_token_series(series: pd.Series) -> pd.Series:
+    return (
+        series.astype(str)
+        .str.strip()
+        .str.lower()
+        .str.replace("-", "_", regex=False)
+        .str.replace(" ", "_", regex=False)
+    )
+
+
+def _normalize_token(value: str) -> str:
+    return str(value).strip().lower().replace("-", "_").replace(" ", "_")
 
 
 def resolve_close_col(df: pd.DataFrame) -> str:
@@ -136,6 +151,10 @@ def build_long_only_positions(
     - decision_* columns describe MODEL DECISION on the current bar
     - execution_* columns describe REAL EXECUTION after execution_lag
     - signal is kept as a backward-compatible alias to execution_entry_signal
+
+    Strict conformal mode:
+    - if lower_bound_required=True and lower_bound_col exists, ENTRY is allowed only when pred_lo > enter_threshold
+    - point forecast (pred) is kept only as diagnostic info
     """
     if policy is None:
         policy = PositionPolicyConfig()
@@ -163,7 +182,9 @@ def build_long_only_positions(
     )
 
     if regime_col in out.columns:
-        blocked = out[regime_col].astype(str).isin(set(policy.block_regimes))
+        regime_norm = _normalize_token_series(out[regime_col])
+        blocked_set = {_normalize_token(x) for x in policy.block_regimes}
+        blocked = regime_norm.isin(blocked_set)
     else:
         blocked = pd.Series(False, index=out.index)
 
@@ -189,15 +210,17 @@ def build_long_only_positions(
         upper=policy.max_position,
     )
 
-    # Entry/exit logic for decision day
-    if lower is not None:
-        point_entry_ok = lower > float(enter_threshold)
-    else:
-        point_entry_ok = pred > float(enter_threshold)
-
+    point_entry_ok = pred > float(enter_threshold)
     point_exit_ok = pred < float(exit_threshold)
 
-    enter_ok = point_entry_ok & trend_ok & (~blocked)
+    if lower is not None:
+        lower_bound_ok = lower > float(enter_threshold)
+        enter_gate = lower_bound_ok if policy.lower_bound_required else point_entry_ok
+    else:
+        lower_bound_ok = point_entry_ok.copy()
+        enter_gate = point_entry_ok
+
+    enter_ok = enter_gate & trend_ok & (~blocked)
     exit_ok = point_exit_ok | (~trend_ok) | blocked
 
     decision_weight = np.zeros(len(out), dtype=float)
@@ -223,8 +246,6 @@ def build_long_only_positions(
                 current_weight = 0.0
         else:
             hold_bars += 1
-
-            # Rebalance while position is open
             current_weight = float(
                 np.clip(
                     desired_weight.iloc[i],
@@ -250,6 +271,7 @@ def build_long_only_positions(
 
     out["point_entry_ok"] = point_entry_ok.astype(int)
     out["point_exit_ok"] = point_exit_ok.astype(int)
+    out["lower_bound_ok"] = lower_bound_ok.astype(int)
     out["decision_enter_ok"] = enter_ok.astype(int)
     out["decision_exit_ok"] = exit_ok.astype(int)
 
@@ -280,7 +302,6 @@ def build_long_only_positions(
         ((prev_exec_pos > 0).astype(int) - (out["position"] > 0).astype(int)).clip(lower=0)
     )
 
-    # Backward-compatible alias
     out["signal"] = out["execution_entry_signal"]
 
     out["turnover"] = out["position"].diff().abs().fillna(out["position"].abs())
@@ -293,7 +314,6 @@ def build_long_only_positions(
     out["gross_ret"] = out["position"] * daily_ret
     out["net_ret"] = out["gross_ret"] - out["total_cost"]
 
-    # Compatibility aliases
     out["strategy_return"] = out["net_ret"]
     out["actual_return"] = daily_ret
     out["close_used"] = _coerce_numeric(out[close_col])
