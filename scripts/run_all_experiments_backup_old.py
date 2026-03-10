@@ -609,65 +609,17 @@ def guess_config_from_run_dir(run_dir: Path, state_by_dir: dict[str, dict[str, A
     return None
 
 
-def get_cfg_stage(cfg: dict[str, Any]) -> str | None:
-    pipeline_cfg = cfg.get("pipeline", {}) or {}
-    if isinstance(pipeline_cfg, dict):
-        stage = pipeline_cfg.get("stage")
-        return str(stage).lower() if stage is not None else None
-    return None
-
-
-def summarize_ticker_list(tickers: list[str], max_items: int = 8) -> str:
-    cleaned = [str(t).upper() for t in tickers if str(t).strip()]
-    if not cleaned:
-        return "-"
-    preview = cleaned[:max_items]
-    text = ", ".join(preview)
-    if len(cleaned) > max_items:
-        text += f" ... (+{len(cleaned) - max_items})"
-    return text
-
-
-def build_effective_cfg(
-    base_cfg: dict[str, Any],
-    ticker: str | None,
-    *,
-    m8_mode: str,
-    suite_ticker_override: list[str] | None = None,
-) -> dict[str, Any]:
+def build_effective_cfg(base_cfg: dict[str, Any], ticker: str, *, single_ticker_suite: bool) -> dict[str, Any]:
     cfg = deepcopy(base_cfg)
     cfg.setdefault("data", {})
+    cfg["data"]["ticker"] = ticker
+
     if "base_path" not in cfg["data"]:
         cfg["data"]["base_path"] = "data"
 
-    stage = get_cfg_stage(cfg)
-    if stage != "m8":
-        if ticker:
-            cfg["data"]["ticker"] = str(ticker).upper()
-        return cfg
+    if single_ticker_suite and isinstance(cfg.get("suite"), dict):
+        cfg["suite"]["tickers"] = [ticker]
 
-    suite_cfg = cfg.setdefault("suite", {})
-    if not isinstance(suite_cfg, dict):
-        raise ValueError("M8 config requires suite: {...} mapping")
-
-    if m8_mode == "single_ticker":
-        if not ticker:
-            raise ValueError("single_ticker m8_mode requires an explicit ticker")
-        batch_ticker = str(ticker).upper()
-        cfg["data"]["ticker"] = batch_ticker
-        suite_cfg["tickers"] = [batch_ticker]
-        return cfg
-
-    if suite_ticker_override:
-        suite_tickers = [str(t).upper() for t in suite_ticker_override if str(t).strip()]
-        suite_cfg["tickers"] = suite_tickers
-    else:
-        suite_tickers = [str(t).upper() for t in suite_cfg.get("tickers", []) if str(t).strip()]
-
-    if not suite_tickers:
-        raise ValueError("true_multi m8_mode requires non-empty suite.tickers")
-
-    cfg["data"]["ticker"] = suite_tickers[0]
     return cfg
 
 
@@ -677,75 +629,35 @@ def prepare_jobs(
     *,
     resume: bool,
     done_keys: set[str],
-    m8_mode: str,
+    single_ticker_suite: bool,
     group_by_config: bool,
-    suite_ticker_override: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     base_cfg_cache: dict[Path, dict[str, Any]] = {cfg_path: read_yaml(cfg_path) for cfg_path in configs}
     jobs: list[dict[str, Any]] = []
 
-    def _append_job(cfg_path: Path, ticker_label: str | None) -> None:
+    if group_by_config:
+        iterable: Iterable[tuple[Path, str]] = ((cfg, ticker) for cfg in configs for ticker in tickers)
+    else:
+        iterable = ((cfg, ticker) for ticker in tickers for cfg in configs)
+
+    for cfg_path, ticker in iterable:
         base_cfg = base_cfg_cache[cfg_path]
-        stage = get_cfg_stage(base_cfg)
-        is_true_multi_m8 = bool(stage == "m8" and m8_mode == "true_multi")
-
-        effective_cfg = build_effective_cfg(
-            base_cfg,
-            ticker_label,
-            m8_mode=m8_mode if stage == "m8" else "single_ticker",
-            suite_ticker_override=suite_ticker_override if is_true_multi_m8 else None,
-        )
+        effective_cfg = build_effective_cfg(base_cfg, ticker, single_ticker_suite=single_ticker_suite)
         cfg_hash = compute_cfg_hash(effective_cfg)
-
-        if is_true_multi_m8:
-            key = f"{cfg_path.name}::SUITE::{cfg_hash}"
-            display_ticker = "SUITE"
-        else:
-            if ticker_label is None:
-                raise ValueError(f"Non-suite job requires ticker for {cfg_path.name}")
-            key = f"{cfg_path.name}::{ticker_label}::{cfg_hash}"
-            display_ticker = str(ticker_label).upper()
+        key = f"{cfg_path.name}::{ticker}::{cfg_hash}"
 
         if resume and key in done_keys:
-            return
+            continue
 
-        suite_cfg = effective_cfg.get("suite", {}) or {}
-        suite_tickers = suite_cfg.get("tickers", []) if isinstance(suite_cfg, dict) else []
         jobs.append(
             {
                 "config_path": cfg_path,
-                "ticker": display_ticker,
+                "ticker": ticker,
                 "effective_cfg": effective_cfg,
                 "cfg_hash": cfg_hash,
                 "key": key,
-                "job_kind": "suite" if is_true_multi_m8 else "single",
-                "suite_tickers": [str(t).upper() for t in suite_tickers if str(t).strip()],
             }
         )
-
-    m8_configs = [cfg for cfg in configs if get_cfg_stage(base_cfg_cache[cfg]) == "m8"]
-    non_m8_configs = [cfg for cfg in configs if get_cfg_stage(base_cfg_cache[cfg]) != "m8"]
-
-    if m8_mode == "true_multi":
-        for cfg_path in m8_configs:
-            _append_job(cfg_path, None)
-
-    iterable: Iterable[tuple[Path, str]]
-    if group_by_config:
-        iterable = ((cfg, ticker) for cfg in non_m8_configs for ticker in tickers)
-    else:
-        iterable = ((cfg, ticker) for ticker in tickers for cfg in non_m8_configs)
-
-    for cfg_path, ticker in iterable:
-        _append_job(cfg_path, ticker)
-
-    if m8_mode != "true_multi":
-        if group_by_config:
-            iterable_m8 = ((cfg, ticker) for cfg in m8_configs for ticker in tickers)
-        else:
-            iterable_m8 = ((cfg, ticker) for ticker in tickers for cfg in m8_configs)
-        for cfg_path, ticker in iterable_m8:
-            _append_job(cfg_path, ticker)
 
     return jobs
 
@@ -766,22 +678,17 @@ def print_plan_summary(
     logs_dir: Path,
     index_dir: Path,
     showcase_dir: Path,
-    m8_mode: str,
+    single_ticker_suite: bool,
     resume: bool,
-    ticker_override_active: bool,
 ) -> None:
     table = Table(title="Batch universe plan", box=box.MINIMAL_HEAVY_HEAD)
     table.add_column("Item", style="cyan")
     table.add_column("Value", style="white")
     table.add_row("Configs matched", str(len(configs)))
-    if m8_mode == "true_multi" and not ticker_override_active:
-        table.add_row("Tickers selected", "config-driven")
-    else:
-        table.add_row("Tickers selected", str(len(tickers)))
+    table.add_row("Tickers selected", str(len(tickers)))
     table.add_row("Jobs to run", str(len(jobs)))
     table.add_row("Resume", str(resume))
-    table.add_row("M8 mode", str(m8_mode))
-    table.add_row("Ticker override", str(ticker_override_active))
+    table.add_row("Single-ticker suite", str(single_ticker_suite))
     table.add_row("Output dir", str(output_dir))
     table.add_row("Logs dir", str(logs_dir))
     table.add_row("State file", str(state_path))
@@ -790,17 +697,11 @@ def print_plan_summary(
     console.print(table)
 
     preview_cfgs = ", ".join(p.name for p in configs[:6])
-    if m8_mode == "true_multi" and not ticker_override_active:
-        preview_tickers = "from suite.tickers in each config"
-    else:
-        preview_tickers = ", ".join(tickers[:10])
-        if len(tickers) > 10:
-            preview_tickers += " ..."
-
+    preview_tickers = ", ".join(tickers[:10])
     console.print(
         Panel(
             f"[bold]Configs:[/bold] {preview_cfgs}{' ...' if len(configs) > 6 else ''}\n"
-            f"[bold]Tickers:[/bold] {preview_tickers}",
+            f"[bold]Tickers:[/bold] {preview_tickers}{' ...' if len(tickers) > 10 else ''}",
             title="Selection preview",
             border_style="blue",
         )
@@ -1055,25 +956,16 @@ def build_results_index_and_showcase(
 
     rows_json: list[dict[str, Any]] = []
     rows_csv: list[dict[str, Any]] = []
-    suite_ticker_rows_json: list[dict[str, Any]] = []
-    suite_ticker_rows_csv: list[dict[str, Any]] = []
 
     for run_dir in run_dirs:
         ctx = load_run_context(run_dir, ok_state_by_run_dir)
         metrics, metric_files = collect_metrics_from_run_dir(run_dir)
 
-        suite_summary_path = run_dir / "suite_summary.csv"
-        suite_summary_rows: list[dict[str, Any]] = []
-        if str(ctx.get("stage") or "").lower() == "m8" and suite_summary_path.exists():
-            suite_metrics = extract_metrics_from_suite_summary_csv(suite_summary_path)
-            metrics.update(suite_metrics)
-            for encoding in ("utf-8-sig", "utf-8"):
-                try:
-                    with suite_summary_path.open("r", encoding=encoding, newline="") as f:
-                        suite_summary_rows = list(csv.DictReader(f))
-                    break
-                except Exception:
-                    suite_summary_rows = []
+        if str(ctx.get("stage") or "").lower() == "m8":
+            suite_summary_path = run_dir / "suite_summary.csv"
+            if suite_summary_path.exists():
+                suite_metrics = extract_metrics_from_suite_summary_csv(suite_summary_path)
+                metrics.update(suite_metrics)
 
         ret_key, ret_val = pick_best_metric(metrics, RETURN_KEYS_PRIORITY)
         sharpe_key, sharpe_val = pick_best_metric(metrics, SHARPE_KEYS_PRIORITY)
@@ -1090,6 +982,7 @@ def build_results_index_and_showcase(
         suite_mode = ctx.get("suite_mode")
         n_suite_tickers = int(ctx.get("n_suite_tickers") or 0)
         is_single_ticker_suite = bool(ctx.get("is_single_ticker_suite"))
+
         exclude_from_showcase = False
 
         row_json = {
@@ -1098,7 +991,6 @@ def build_results_index_and_showcase(
             "cfg_hash": ctx.get("cfg_hash"),
             "stage": stage,
             "suite_mode": suite_mode,
-            "suite_tickers": ctx.get("suite_tickers") or [],
             "n_suite_tickers": n_suite_tickers,
             "is_single_ticker_suite": is_single_ticker_suite,
             "exclude_from_showcase": exclude_from_showcase,
@@ -1131,6 +1023,7 @@ def build_results_index_and_showcase(
             "metric_files": [str(p) for p in metric_files],
             "metrics": metrics,
         }
+
         row_json["defense_ready_score"] = compute_defense_ready_score(row_json)
 
         rows_json.append(row_json)
@@ -1162,44 +1055,11 @@ def build_results_index_and_showcase(
             }
         )
 
-        if suite_summary_rows:
-            for suite_row in suite_summary_rows:
-                parsed = {}
-                for k, v in suite_row.items():
-                    num = try_parse_float(v)
-                    parsed[k] = num if num is not None else v
-                suite_ticker_rows_json.append(
-                    {
-                        "config": ctx.get("config"),
-                        "cfg_hash": ctx.get("cfg_hash"),
-                        "stage": stage,
-                        "suite_mode": suite_mode,
-                        "n_suite_tickers": n_suite_tickers,
-                        "run_dir": str(run_dir),
-                        **parsed,
-                    }
-                )
-                suite_ticker_rows_csv.append(
-                    {
-                        "config": ctx.get("config"),
-                        "cfg_hash": ctx.get("cfg_hash"),
-                        "stage": stage,
-                        "suite_mode": suite_mode,
-                        "n_suite_tickers": n_suite_tickers,
-                        "run_dir": str(run_dir),
-                        **parsed,
-                    }
-                )
-
     index_dir.mkdir(parents=True, exist_ok=True)
     all_json_path = index_dir / "all_results_index.json"
     all_csv_path = index_dir / "all_results_index.csv"
-    suite_ticker_json_path = index_dir / "suite_ticker_results_index.json"
-    suite_ticker_csv_path = index_dir / "suite_ticker_results_index.csv"
     save_json(all_json_path, rows_json)
     save_csv(all_csv_path, rows_csv)
-    save_json(suite_ticker_json_path, suite_ticker_rows_json)
-    save_csv(suite_ticker_csv_path, suite_ticker_rows_csv)
 
     ranked = [
         row
@@ -1304,7 +1164,6 @@ def build_results_index_and_showcase(
                     "cfg_hash": row.get("cfg_hash"),
                     "stage": row.get("stage"),
                     "suite_mode": row.get("suite_mode"),
-                    "suite_tickers": row.get("suite_tickers"),
                     "n_suite_tickers": row.get("n_suite_tickers"),
                     "is_single_ticker_suite": row.get("is_single_ticker_suite"),
                     "return_metric_key": row.get("return_metric_key"),
@@ -1373,8 +1232,6 @@ def build_results_index_and_showcase(
                 [
                     f"[bold]All index JSON:[/bold] {all_json_path}",
                     f"[bold]All index CSV:[/bold] {all_csv_path}",
-                    f"[bold]Suite ticker JSON:[/bold] {suite_ticker_json_path}",
-                    f"[bold]Suite ticker CSV:[/bold] {suite_ticker_csv_path}",
                     f"[bold]Top JSON:[/bold] {top_json_path}",
                     f"[bold]Top CSV:[/bold] {top_csv_path}",
                     f"[bold]Defense JSON:[/bold] {defense_json_path}",
@@ -1382,7 +1239,6 @@ def build_results_index_and_showcase(
                     f"[bold]Showcase dir:[/bold] {showcase_dir}",
                     f"[bold]Ranked runs:[/bold] {len(ranked)}",
                     f"[bold]Defense-ranked runs:[/bold] {len(ranked_defense)}",
-                    f"[bold]Suite ticker rows:[/bold] {len(suite_ticker_rows_csv)}",
                 ]
             ),
             title="[green]Post-processing complete[/green]",
@@ -1393,8 +1249,6 @@ def build_results_index_and_showcase(
     return {
         "all_json_path": str(all_json_path),
         "all_csv_path": str(all_csv_path),
-        "suite_ticker_json_path": str(suite_ticker_json_path),
-        "suite_ticker_csv_path": str(suite_ticker_csv_path),
         "top_json_path": str(top_json_path),
         "top_csv_path": str(top_csv_path),
         "defense_json_path": str(defense_json_path),
@@ -1402,7 +1256,6 @@ def build_results_index_and_showcase(
         "showcase_dir": str(showcase_dir),
         "ranked_runs": len(ranked),
         "defense_ranked_runs": len(ranked_defense),
-        "suite_ticker_rows": len(suite_ticker_rows_csv),
         "top_count": len(top_rows),
         "defense_top_count": len(top_defense_rows),
     }
@@ -1410,7 +1263,7 @@ def build_results_index_and_showcase(
 
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(
-        description="Sequential batch pipeline for running experiment configs across a ticker universe."
+        description="Sequential batch pipeline for running all tickers through all experiment configs."
     )
     ap.add_argument("--configs-glob", default="configs/exp_m*.yaml", help='Config glob. Example: "configs/exp_m*.yaml"')
     ap.add_argument("--data-root", default="data", help="Path to data root with Stocks/ and ETFs/")
@@ -1430,18 +1283,12 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--group-by-config",
         action="store_true",
-        help="Iterate non-M8 jobs as config -> tickers. Default is ticker -> configs.",
-    )
-    ap.add_argument(
-        "--m8-mode",
-        choices=["single_ticker", "true_multi"],
-        default="single_ticker",
-        help="M8 execution mode: single_ticker emulation or true_multi suite-level run.",
+        help="Iterate as config -> tickers. Default is ticker -> configs.",
     )
     ap.add_argument(
         "--keep-suite-list",
         action="store_true",
-        help="Legacy compatibility flag. Ignored when --m8-mode true_multi.",
+        help="Do not replace suite.tickers with [ticker] for m8 configs.",
     )
     ap.add_argument(
         "--skip-postprocess",
@@ -1479,12 +1326,8 @@ def main() -> int:
     if args.max_tickers and args.max_tickers > 0:
         tickers = tickers[: args.max_tickers]
 
-    user_limited_tickers = bool(args.tickers.strip() or (args.max_tickers and args.max_tickers > 0))
-    if not tickers and user_limited_tickers:
-        console.print("[red][ERR][/red] No tickers selected after applying whitelist/max-tickers.")
-        return 2
     if not tickers:
-        console.print("[red][ERR][/red] No tickers available under the requested data root.")
+        console.print("[red][ERR][/red] No tickers selected.")
         return 2
 
     output_dir = (REPO_ROOT / args.output_dir).resolve()
@@ -1494,9 +1337,6 @@ def main() -> int:
     index_dir = (REPO_ROOT / args.index_dir).resolve()
     showcase_dir = (REPO_ROOT / args.showcase_dir).resolve()
 
-    if args.keep_suite_list and args.m8_mode == "true_multi":
-        console.print("[yellow]--keep-suite-list is ignored when --m8-mode true_multi[/yellow]")
-
     effective_resume = bool(args.resume)
     if effective_resume and not has_real_run_dirs(output_dir):
         console.print(
@@ -1505,17 +1345,14 @@ def main() -> int:
         )
         effective_resume = False
 
-    suite_ticker_override = tickers if args.m8_mode == "true_multi" and user_limited_tickers else None
-
     done_keys = load_done_keys(state_path) if effective_resume else set()
     jobs = prepare_jobs(
         configs=configs,
         tickers=tickers,
         resume=effective_resume,
         done_keys=done_keys,
-        m8_mode=args.m8_mode,
+        single_ticker_suite=not args.keep_suite_list,
         group_by_config=args.group_by_config,
-        suite_ticker_override=suite_ticker_override,
     )
 
     print_plan_summary(
@@ -1527,9 +1364,8 @@ def main() -> int:
         logs_dir=logs_dir,
         index_dir=index_dir,
         showcase_dir=showcase_dir,
-        m8_mode=args.m8_mode,
+        single_ticker_suite=not args.keep_suite_list,
         resume=effective_resume,
-        ticker_override_active=bool(suite_ticker_override),
     )
 
     if not jobs:
@@ -1568,8 +1404,6 @@ def main() -> int:
             job_table.add_row("Config", job["config_path"].name)
             job_table.add_row("Ticker", job["ticker"])
             job_table.add_row("Cfg hash", job["cfg_hash"])
-            if job.get("suite_tickers"):
-                job_table.add_row("Suite tickers", summarize_ticker_list(list(job["suite_tickers"])))
             console.print(job_table)
 
             result = run_one_job(
