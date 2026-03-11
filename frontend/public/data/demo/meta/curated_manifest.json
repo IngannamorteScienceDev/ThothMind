@@ -1,0 +1,22 @@
+{
+  "mode": "demo",
+  "is_synthetic_demo": true,
+  "label": "Interactive interface demonstration based on synthetic sample data",
+  "raw_stocks_available": 7195,
+  "raw_etfs_available": 1344,
+  "stocks_count": 421,
+  "etfs_count": 79,
+  "total_expected": 500,
+  "total_copied": 500,
+  "missing_files_count": 0,
+  "selection_params": {
+    "max_tickers": 500,
+    "seed": 42,
+    "n_configs": 8
+  },
+  "notes": [
+    "Synthetic interface dataset for GitHub Pages / click-through demo.",
+    "Ticker symbols are real and sourced from the raw dataset.",
+    "Performance metrics are synthetic and must not be presented as real experiment results."
+  ]
+}

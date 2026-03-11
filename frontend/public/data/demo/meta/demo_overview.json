@@ -1,0 +1,19 @@
+{
+  "mode": "demo",
+  "n_suite_runs": 8,
+  "n_ticker_rows": 4000,
+  "n_unique_tickers": 500,
+  "raw_stocks_available": 7195,
+  "raw_etfs_available": 1344,
+  "configs": [
+    "demo_m8_true_multi_base.yaml",
+    "demo_m8_true_multi_h5.yaml",
+    "demo_m8_true_multi_h10.yaml",
+    "demo_m8_true_multi_h20.yaml",
+    "demo_m9_defensive_base.yaml",
+    "demo_m9_defensive_regime.yaml",
+    "demo_m9_aggressive_base.yaml",
+    "demo_m9_aggressive_trend.yaml"
+  ],
+  "target_root": "E:\\GitHub\\ThothMind\\frontend\\public\\data\\demo"
+}

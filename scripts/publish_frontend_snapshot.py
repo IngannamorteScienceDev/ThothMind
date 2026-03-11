@@ -91,7 +91,6 @@ def main() -> int:
     for src, dst in required_files.items():
         copy_file(src, dst)
 
-    # Optional extra metadata
     overview = {
         "mode": args.target_mode,
         "source_reports_dir": str(reports_dir),
