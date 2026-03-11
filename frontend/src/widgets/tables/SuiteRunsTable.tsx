@@ -1,4 +1,5 @@
-﻿import type { SuiteRun } from "../../shared/types/api";
+﻿import { Link } from "react-router-dom";
+import type { SuiteRun } from "../../shared/types/api";
 
 type Props = {
   rows: SuiteRun[];
@@ -53,7 +54,13 @@ export default function SuiteRunsTable({ rows }: Props) {
             {rows.map((row, idx) => (
               <tr key={`${row.config}-${idx}`}>
                 <td>
-                  <div className="cell-primary">{row.config}</div>
+                  <Link
+                    to={`/suite-runs/${encodeURIComponent(row.config)}`}
+                    className="detail-link"
+                  >
+                    <div className="cell-primary">{row.config}</div>
+                    <div className="cell-secondary">Open suite detail →</div>
+                  </Link>
                 </td>
                 <td>
                   <span className="badge badge--blue">{row.ticker}</span>

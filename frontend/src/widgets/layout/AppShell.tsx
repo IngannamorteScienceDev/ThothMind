@@ -1,4 +1,8 @@
 ﻿import { NavLink, Outlet } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import type { SuiteRun, SuiteTickerResult } from "../../shared/types/api";
+import { loadSuiteRuns, loadSuiteTickerResults } from "../../services/dataLoader";
+import { adaptSuiteRuns, adaptSuiteTickerResults } from "../../services/adapters";
 
 const navItems = [
   { to: "/", label: "Overview", end: true },
@@ -8,6 +12,35 @@ const navItems = [
 ];
 
 export default function AppShell() {
+  const [suiteRuns, setSuiteRuns] = useState<SuiteRun[]>([]);
+  const [tickerRows, setTickerRows] = useState<SuiteTickerResult[]>([]);
+
+  useEffect(() => {
+    async function bootstrap() {
+      const [suiteRaw, tickerRaw] = await Promise.all([
+        loadSuiteRuns(),
+        loadSuiteTickerResults(),
+      ]);
+
+      setSuiteRuns(adaptSuiteRuns(suiteRaw));
+      setTickerRows(adaptSuiteTickerResults(tickerRaw));
+    }
+
+    bootstrap();
+  }, []);
+
+  const snapshot = useMemo(() => {
+    const configs = new Set(suiteRuns.map((r) => r.config)).size;
+    const stages = new Set(suiteRuns.map((r) => r.stage)).size;
+    const universe = suiteRuns.reduce(
+      (acc, row) => Math.max(acc, row.n_suite_tickers || 0),
+      0
+    );
+    const tickerCount = new Set(tickerRows.map((r) => r.ticker)).size;
+
+    return { configs, stages, universe, tickerCount };
+  }, [suiteRuns, tickerRows]);
+
   return (
     <div className="app-shell">
       <div className="background-glow background-glow--blue" />
@@ -17,6 +50,10 @@ export default function AppShell() {
       <aside className="sidebar">
         <div className="sidebar__inner">
           <div className="brand">
+            <div className="brand-mark">
+              <span>T</span>
+              <span>M</span>
+            </div>
             <div className="brand__eyebrow">Institutional Research Terminal</div>
             <div className="brand__title">ThothMind</div>
             <div className="brand__subtitle">
@@ -59,6 +96,27 @@ export default function AppShell() {
       </aside>
 
       <main className="main-content">
+        <div className="global-snapshot-bar">
+          <div className="global-snapshot-bar__title">Dataset snapshot</div>
+          <div className="global-snapshot-chip">
+            <span className="global-snapshot-chip__label">Configs</span>
+            <span className="global-snapshot-chip__value">{snapshot.configs}</span>
+          </div>
+          <div className="global-snapshot-chip">
+            <span className="global-snapshot-chip__label">Stages</span>
+            <span className="global-snapshot-chip__value">{snapshot.stages}</span>
+          </div>
+          <div className="global-snapshot-chip">
+            <span className="global-snapshot-chip__label">Universe</span>
+            <span className="global-snapshot-chip__value">{snapshot.universe}</span>
+          </div>
+          <div className="global-snapshot-chip">
+            <span className="global-snapshot-chip__label">Tickers</span>
+            <span className="global-snapshot-chip__value">{snapshot.tickerCount}</span>
+          </div>
+          <div className="global-snapshot-bar__mode">M8 true multi • curated demo universe</div>
+        </div>
+
         <Outlet />
       </main>
     </div>

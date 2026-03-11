@@ -1085,3 +1085,128 @@ strong {
     grid-template-columns: 1fr;
   }
 }
+
+.brand-mark {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  place-items: center;
+  margin-bottom: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(113, 231, 220, 0.16);
+  background:
+    linear-gradient(135deg, rgba(112, 165, 255, 0.16), rgba(113, 231, 220, 0.08)),
+    rgba(255, 255, 255, 0.03);
+  box-shadow: var(--shadow-md);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  font-size: 18px;
+}
+
+.global-snapshot-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(114, 138, 190, 0.14);
+  background:
+    linear-gradient(180deg, rgba(16, 25, 45, 0.72), rgba(9, 16, 29, 0.92));
+  box-shadow: var(--shadow-md);
+}
+
+.global-snapshot-bar__title {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  margin-right: 6px;
+}
+
+.global-snapshot-bar__mode {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.global-snapshot-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(114, 138, 190, 0.16);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.global-snapshot-chip__label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+}
+
+.global-snapshot-chip__value {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.detail-link {
+  display: block;
+}
+
+.detail-link:hover .cell-primary {
+  color: var(--cyan);
+}
+
+.cell-secondary {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.detail-grid__wide {
+  grid-column: 1 / -1;
+}
+
+.detail-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.detail-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(114, 138, 190, 0.16);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+}
+
+.detail-back-link:hover {
+  border-color: rgba(113, 231, 220, 0.22);
+  color: var(--cyan);
+}
+
+@media (max-width: 1180px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .global-snapshot-bar__mode {
+    margin-left: 0;
+    width: 100%;
+  }
+}
