@@ -1,4 +1,4 @@
-﻿import type { CuratedManifest } from "../shared/types/api";
+﻿import type { ArtifactFreshness, CuratedManifest } from "../shared/types/api";
 
 async function safeFetchJson<T>(path: string, fallback: T): Promise<T> {
   try {
@@ -9,6 +9,23 @@ async function safeFetchJson<T>(path: string, fallback: T): Promise<T> {
     return (await response.json()) as T;
   } catch {
     return fallback;
+  }
+}
+
+async function safeFetchLastModified(path: string): Promise<string | null> {
+  try {
+    const response = await fetch(path, {
+      method: "HEAD",
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    return response.headers.get("last-modified");
+  } catch {
+    return null;
   }
 }
 
@@ -33,4 +50,25 @@ export async function loadCuratedManifest(): Promise<CuratedManifest | null> {
     "/data/meta/curated_manifest.json",
     null
   );
+}
+
+export async function loadArtifactFreshness(): Promise<ArtifactFreshness> {
+  const [
+    suiteIndexLastModified,
+    tickerIndexLastModified,
+    topReturnLastModified,
+    topDefenseLastModified,
+  ] = await Promise.all([
+    safeFetchLastModified("/data/index/all_results_index.json"),
+    safeFetchLastModified("/data/index/suite_ticker_results_index.json"),
+    safeFetchLastModified("/data/showcase/top10_by_return.json"),
+    safeFetchLastModified("/data/showcase/top10_defense_ready.json"),
+  ]);
+
+  return {
+    suiteIndexLastModified,
+    tickerIndexLastModified,
+    topReturnLastModified,
+    topDefenseLastModified,
+  };
 }

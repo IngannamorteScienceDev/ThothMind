@@ -54,3 +54,10 @@ export type CuratedManifest = {
   missing_files_count?: number;
   missing_files?: string[];
 };
+
+export type ArtifactFreshness = {
+  suiteIndexLastModified: string | null;
+  tickerIndexLastModified: string | null;
+  topReturnLastModified: string | null;
+  topDefenseLastModified: string | null;
+};

@@ -45,11 +45,37 @@ export default function SuiteDetailPage() {
       (a, b) => (a.strat_max_drawdown ?? Infinity) - (b.strat_max_drawdown ?? Infinity)
     );
 
+    const positiveCount = tickers.filter(
+      (r) => typeof r.strat_total_return === "number" && (r.strat_total_return ?? 0) > 0
+    ).length;
+
+    const avgSharpeValues = tickers
+      .map((r) => r.strat_sharpe)
+      .filter((v): v is number => typeof v === "number");
+
+    const avgSharpe =
+      avgSharpeValues.length > 0
+        ? avgSharpeValues.reduce((a, b) => a + b, 0) / avgSharpeValues.length
+        : null;
+
+    const avgReturnValues = tickers
+      .map((r) => r.strat_total_return)
+      .filter((v): v is number => typeof v === "number");
+
+    const avgReturn =
+      avgReturnValues.length > 0
+        ? avgReturnValues.reduce((a, b) => a + b, 0) / avgReturnValues.length
+        : null;
+
     return {
       suite,
       tickers,
-      topTickers: sortedByReturn.slice(0, 5),
-      worstDrawdowns: sortedByDrawdown.slice(0, 5),
+      topTickers: sortedByReturn.slice(0, 6),
+      worstDrawdowns: sortedByDrawdown.slice(0, 6),
+      registryPreview: sortedByReturn.slice(0, 12),
+      positiveCount,
+      avgSharpe,
+      avgReturn,
     };
   }, [suiteRuns, tickerRows, decodedConfig]);
 
@@ -74,9 +100,9 @@ export default function SuiteDetailPage() {
           <div className="section-label">Suite detail</div>
           <h1 className="section-hero__title">{detail.suite.config}</h1>
           <p className="section-hero__text">
-            Detailed analytical view for one suite-level experiment. This page links
-            aggregate performance to instrument-level outputs and provides a defendable
-            explanation layer for the selected configuration.
+            Detailed analytical view for one suite-level experiment. This page connects
+            aggregate performance metrics with ticker-level outputs and provides a
+            defendable interpretation layer for the selected configuration.
           </p>
           <div className="hero__chips">
             <span className="hero-chip">{detail.suite.stage}</span>
@@ -97,6 +123,34 @@ export default function SuiteDetailPage() {
           <div className="mini-stat">
             <div className="mini-stat__label">p-value</div>
             <div className="mini-stat__value">{fmt(detail.suite.p_value_one_sided, 4)}</div>
+          </div>
+        </div>
+      </section>
+
+      <section className="snapshot-strip">
+        <div className="snapshot-card">
+          <div className="snapshot-card__label">Universe</div>
+          <div className="snapshot-card__value">{detail.suite.n_suite_tickers}</div>
+          <div className="snapshot-card__meta">Tickers included in this suite</div>
+        </div>
+
+        <div className="snapshot-card">
+          <div className="snapshot-card__label">Average ticker return</div>
+          <div className="snapshot-card__value">{fmt(detail.avgReturn)}%</div>
+          <div className="snapshot-card__meta">Computed from per-ticker suite rows</div>
+        </div>
+
+        <div className="snapshot-card">
+          <div className="snapshot-card__label">Average ticker sharpe</div>
+          <div className="snapshot-card__value">{fmt(detail.avgSharpe, 4)}</div>
+          <div className="snapshot-card__meta">Risk-adjusted average across visible rows</div>
+        </div>
+
+        <div className="snapshot-card">
+          <div className="snapshot-card__label">Positive instruments</div>
+          <div className="snapshot-card__value">{detail.positiveCount}</div>
+          <div className="snapshot-card__meta">
+            Tickers with positive strategy return in this configuration
           </div>
         </div>
       </section>
@@ -189,6 +243,45 @@ export default function SuiteDetailPage() {
                 p-value and drawdown, not as unconditional evidence of superiority.
               </div>
             </div>
+          </div>
+        </section>
+
+        <section className="table-card table-card--terminal detail-grid__wide">
+          <div className="table-card__header">
+            <div>
+              <div className="section-label">Ticker registry</div>
+              <div className="table-card__title">Highest-return ticker preview</div>
+            </div>
+            <div className="table-card__meta">{detail.registryPreview.length} rows shown</div>
+          </div>
+
+          <div className="table-wrap">
+            <table className="tm-table tm-table--terminal">
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th>Status</th>
+                  <th>Return</th>
+                  <th>Sharpe</th>
+                  <th>Drawdown</th>
+                  <th>p-value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detail.registryPreview.map((row, idx) => (
+                  <tr key={`${row.ticker}-${idx}`}>
+                    <td>
+                      <div className="cell-primary">{row.ticker}</div>
+                    </td>
+                    <td>{row.status ?? "—"}</td>
+                    <td className="num-cell">{fmt(row.strat_total_return)}</td>
+                    <td className="num-cell">{fmt(row.strat_sharpe, 4)}</td>
+                    <td className="num-cell">{fmt(row.strat_max_drawdown)}</td>
+                    <td className="num-cell">{fmt(row.p_value_one_sided, 4)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </section>
       </div>

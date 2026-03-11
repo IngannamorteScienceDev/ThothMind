@@ -1,4 +1,32 @@
-﻿export default function MethodologyPage() {
+﻿import { useEffect, useState } from "react";
+import type { ArtifactFreshness, CuratedManifest } from "../shared/types/api";
+import { loadArtifactFreshness, loadCuratedManifest } from "../services/dataLoader";
+
+function prettyDate(value: string | null | undefined) {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString();
+}
+
+export default function MethodologyPage() {
+  const [manifest, setManifest] = useState<CuratedManifest | null>(null);
+  const [freshness, setFreshness] = useState<ArtifactFreshness | null>(null);
+
+  useEffect(() => {
+    async function bootstrap() {
+      const [manifestRaw, freshnessRaw] = await Promise.all([
+        loadCuratedManifest(),
+        loadArtifactFreshness(),
+      ]);
+
+      setManifest(manifestRaw);
+      setFreshness(freshnessRaw);
+    }
+
+    bootstrap();
+  }, []);
+
   return (
     <div className="page">
       <section className="section-hero">
@@ -25,6 +53,64 @@
           <div className="mini-stat">
             <div className="mini-stat__label">Interface</div>
             <div className="mini-stat__value">React</div>
+          </div>
+        </div>
+      </section>
+
+      <section className="dataset-panel">
+        <div className="dataset-panel__header">
+          <div>
+            <div className="section-label">Artifact lifecycle</div>
+            <h2 className="section-title">Freshness and dataset provenance</h2>
+          </div>
+          <div className="dataset-status">
+            {manifest ? "curated manifest loaded" : "manifest missing"}
+          </div>
+        </div>
+
+        <div className="dataset-panel__grid">
+          <div className="dataset-metric">
+            <div className="dataset-metric__label">Stocks</div>
+            <div className="dataset-metric__value">{manifest?.stocks_count ?? "—"}</div>
+          </div>
+          <div className="dataset-metric">
+            <div className="dataset-metric__label">ETFs</div>
+            <div className="dataset-metric__value">{manifest?.etfs_count ?? "—"}</div>
+          </div>
+          <div className="dataset-metric">
+            <div className="dataset-metric__label">Expected</div>
+            <div className="dataset-metric__value">{manifest?.total_expected ?? "—"}</div>
+          </div>
+          <div className="dataset-metric">
+            <div className="dataset-metric__label">Copied</div>
+            <div className="dataset-metric__value">{manifest?.total_copied ?? "—"}</div>
+          </div>
+        </div>
+
+        <div className="freshness-grid">
+          <div className="freshness-card">
+            <div className="freshness-card__label">Suite index</div>
+            <div className="freshness-card__value">
+              {prettyDate(freshness?.suiteIndexLastModified)}
+            </div>
+          </div>
+          <div className="freshness-card">
+            <div className="freshness-card__label">Ticker index</div>
+            <div className="freshness-card__value">
+              {prettyDate(freshness?.tickerIndexLastModified)}
+            </div>
+          </div>
+          <div className="freshness-card">
+            <div className="freshness-card__label">Top by return</div>
+            <div className="freshness-card__value">
+              {prettyDate(freshness?.topReturnLastModified)}
+            </div>
+          </div>
+          <div className="freshness-card">
+            <div className="freshness-card__label">Top defense-ready</div>
+            <div className="freshness-card__value">
+              {prettyDate(freshness?.topDefenseLastModified)}
+            </div>
           </div>
         </div>
       </section>

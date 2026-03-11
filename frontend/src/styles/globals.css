@@ -1357,3 +1357,89 @@ strong {
     flex-direction: column;
   }
 }
+
+.table-card,
+.terminal-card,
+.chart-card,
+.snapshot-card,
+.dataset-panel,
+.metrics-strip__card,
+.kpi-card,
+.mini-stat,
+.method-metric,
+.research-annotation,
+.pipeline-step,
+.mini-list__item,
+.global-snapshot-chip,
+.detail-back-link,
+.hero-chip,
+.sidebar-chip,
+.nav-link,
+.search-input,
+.select-input {
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    color 0.18s ease;
+}
+
+.table-card:hover,
+.terminal-card:hover,
+.chart-card:hover,
+.snapshot-card:hover,
+.dataset-panel:hover,
+.metrics-strip__card:hover,
+.kpi-card:hover {
+  transform: translateY(-1px);
+}
+
+.tm-table tbody tr {
+  transition: background 0.18s ease;
+}
+
+.tm-table tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.032);
+}
+
+.freshness-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.freshness-card {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(114, 138, 190, 0.12);
+  background:
+    linear-gradient(180deg, rgba(25, 37, 67, 0.46), rgba(16, 25, 45, 0.66));
+}
+
+.freshness-card__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--muted);
+}
+
+.freshness-card__value {
+  margin-top: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+@media (max-width: 1280px) {
+  .freshness-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .freshness-grid {
+    grid-template-columns: 1fr;
+  }
+}
