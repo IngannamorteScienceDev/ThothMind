@@ -1,4 +1,6 @@
-﻿async function safeFetchJson<T>(path: string, fallback: T): Promise<T> {
+﻿import type { CuratedManifest } from "../shared/types/api";
+
+async function safeFetchJson<T>(path: string, fallback: T): Promise<T> {
   try {
     const response = await fetch(path, { cache: "no-store" });
     if (!response.ok) {
@@ -24,4 +26,11 @@ export async function loadTopByReturn() {
 
 export async function loadTopDefenseReady() {
   return safeFetchJson("/data/showcase/top10_defense_ready.json", []);
+}
+
+export async function loadCuratedManifest(): Promise<CuratedManifest | null> {
+  return safeFetchJson<CuratedManifest | null>(
+    "/data/meta/curated_manifest.json",
+    null
+  );
 }

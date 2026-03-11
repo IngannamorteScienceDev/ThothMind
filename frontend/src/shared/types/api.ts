@@ -43,3 +43,14 @@ export type TopRun = {
   defense_ready_score?: NullableNumber;
   run_dir?: string;
 };
+
+export type CuratedManifest = {
+  selected_csv?: string;
+  output_root?: string;
+  stocks_count?: number;
+  etfs_count?: number;
+  total_expected?: number;
+  total_copied?: number;
+  missing_files_count?: number;
+  missing_files?: string[];
+};

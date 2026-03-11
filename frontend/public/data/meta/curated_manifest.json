@@ -1,0 +1,12 @@
+{
+  "selection_name": "demo_30s_10e",
+  "selected_csv": "E:\\GitHub\\ThothMind\\reports\\universe_selection\\demo_30s_10e\\selected_files.csv",
+  "output_root": "E:\\GitHub\\ThothMind\\data_curated_demo_30s_10e",
+  "copy_mode": "copy",
+  "stocks_count": 30,
+  "etfs_count": 10,
+  "total_expected": 40,
+  "total_copied": 40,
+  "missing_files_count": 0,
+  "missing_files": []
+}

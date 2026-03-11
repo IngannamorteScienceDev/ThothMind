@@ -1,6 +1,12 @@
 ﻿import { useEffect, useMemo, useState } from "react";
-import type { SuiteRun, SuiteTickerResult, TopRun } from "../shared/types/api";
+import type {
+  CuratedManifest,
+  SuiteRun,
+  SuiteTickerResult,
+  TopRun,
+} from "../shared/types/api";
 import {
+  loadCuratedManifest,
   loadSuiteRuns,
   loadSuiteTickerResults,
   loadTopByReturn,
@@ -14,6 +20,7 @@ import {
 import KpiCard from "../widgets/kpi/KpiCard";
 import SuiteReturnChart from "../widgets/charts/SuiteReturnChart";
 import SuiteRiskChart from "../widgets/charts/SuiteRiskChart";
+import ReturnDrawdownScatterChart from "../widgets/charts/ReturnDrawdownScatterChart";
 
 function fmt(value: number | null | undefined, digits = 2) {
   return typeof value === "number" ? value.toFixed(digits) : "—";
@@ -24,23 +31,27 @@ export default function OverviewPage() {
   const [tickerRows, setTickerRows] = useState<SuiteTickerResult[]>([]);
   const [topReturn, setTopReturn] = useState<TopRun[]>([]);
   const [topDefense, setTopDefense] = useState<TopRun[]>([]);
+  const [manifest, setManifest] = useState<CuratedManifest | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function bootstrap() {
       setLoading(true);
 
-      const [suiteRaw, tickerRaw, topReturnRaw, topDefenseRaw] = await Promise.all([
-        loadSuiteRuns(),
-        loadSuiteTickerResults(),
-        loadTopByReturn(),
-        loadTopDefenseReady(),
-      ]);
+      const [suiteRaw, tickerRaw, topReturnRaw, topDefenseRaw, manifestRaw] =
+        await Promise.all([
+          loadSuiteRuns(),
+          loadSuiteTickerResults(),
+          loadTopByReturn(),
+          loadTopDefenseReady(),
+          loadCuratedManifest(),
+        ]);
 
       setSuiteRuns(adaptSuiteRuns(suiteRaw));
       setTickerRows(adaptSuiteTickerResults(tickerRaw));
       setTopReturn(adaptTopRuns(topReturnRaw));
       setTopDefense(adaptTopRuns(topDefenseRaw));
+      setManifest(manifestRaw);
       setLoading(false);
     }
 
@@ -63,6 +74,11 @@ export default function OverviewPage() {
           (a, b) =>
             (b.defense_ready_score ?? -Infinity) - (a.defense_ready_score ?? -Infinity)
         )[0] ?? null;
+
+    const bestSharpeRow =
+      suiteRuns
+        .filter((r) => typeof r.sharpe === "number")
+        .sort((a, b) => (b.sharpe ?? -Infinity) - (a.sharpe ?? -Infinity))[0] ?? null;
 
     const maxTickers = suiteRuns.reduce(
       (acc, row) => Math.max(acc, row.n_suite_tickers || 0),
@@ -88,16 +104,26 @@ export default function OverviewPage() {
 
     const okTickerRows = tickerRows.filter((r) => (r.status ?? "").toLowerCase() === "ok").length;
 
+    const minPValue = (() => {
+      const values = suiteRuns
+        .map((r) => r.p_value_one_sided)
+        .filter((v): v is number => typeof v === "number");
+      if (!values.length) return null;
+      return Math.min(...values);
+    })();
+
     return {
       runCount,
       bestReturnRow,
       bestDefenseRow,
+      bestSharpeRow,
       maxTickers,
       medianSharpe,
       configs,
       stages,
       uniqueTickers,
       okTickerRows,
+      minPValue,
     };
   }, [suiteRuns, tickerRows]);
 
@@ -179,6 +205,46 @@ export default function OverviewPage() {
         </div>
       </section>
 
+      <section className="dataset-panel">
+        <div className="dataset-panel__header">
+          <div>
+            <div className="section-label">Dataset metadata</div>
+            <h2 className="section-title">Curated universe snapshot</h2>
+          </div>
+          <div className="dataset-status">
+            {manifest ? "manifest loaded" : "manifest missing"}
+          </div>
+        </div>
+
+        <div className="dataset-panel__grid">
+          <div className="dataset-metric">
+            <div className="dataset-metric__label">Stocks</div>
+            <div className="dataset-metric__value">{manifest?.stocks_count ?? "—"}</div>
+          </div>
+          <div className="dataset-metric">
+            <div className="dataset-metric__label">ETFs</div>
+            <div className="dataset-metric__value">{manifest?.etfs_count ?? "—"}</div>
+          </div>
+          <div className="dataset-metric">
+            <div className="dataset-metric__label">Expected</div>
+            <div className="dataset-metric__value">{manifest?.total_expected ?? "—"}</div>
+          </div>
+          <div className="dataset-metric">
+            <div className="dataset-metric__label">Copied</div>
+            <div className="dataset-metric__value">{manifest?.total_copied ?? "—"}</div>
+          </div>
+        </div>
+
+        <div className="dataset-panel__footer">
+          <div className="dataset-panel__meta">
+            Output root: {manifest?.output_root ?? "not available"}
+          </div>
+          <div className="dataset-panel__meta">
+            Missing files: {manifest?.missing_files_count ?? "—"}
+          </div>
+        </div>
+      </section>
+
       {loading ? <div className="empty-state">Loading research snapshot…</div> : null}
 
       <div className="kpi-grid">
@@ -208,9 +274,33 @@ export default function OverviewPage() {
         />
       </div>
 
-      <div className="chart-grid">
+      <section className="insight-banner">
+        <div className="insight-pill">
+          <div className="insight-pill__label">Best raw return</div>
+          <div className="insight-pill__value">{stats.bestReturnRow?.config ?? "—"}</div>
+        </div>
+        <div className="insight-pill">
+          <div className="insight-pill__label">Best risk-adjusted profile</div>
+          <div className="insight-pill__value">{stats.bestSharpeRow?.config ?? "—"}</div>
+        </div>
+        <div className="insight-pill">
+          <div className="insight-pill__label">Minimum p-value</div>
+          <div className="insight-pill__value">{fmt(stats.minPValue, 4)}</div>
+        </div>
+        <div className="insight-pill insight-pill--warning">
+          <div className="insight-pill__label">Research caution</div>
+          <div className="insight-pill__value">
+            {typeof stats.minPValue === "number" && stats.minPValue <= 0.1
+              ? "Some significance evidence present"
+              : "No strong statistical superiority evidence"}
+          </div>
+        </div>
+      </section>
+
+      <div className="chart-grid chart-grid--triple">
         <SuiteReturnChart rows={suiteRuns} />
         <SuiteRiskChart rows={suiteRuns} />
+        <ReturnDrawdownScatterChart rows={suiteRuns} />
       </div>
 
       <div className="intelligence-grid intelligence-grid--overview">
