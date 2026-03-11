@@ -1054,3 +1054,34 @@ strong {
     grid-template-columns: 1fr;
   }
 }
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.chart-card {
+  padding: 22px;
+  border-radius: 24px;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, rgba(18, 27, 49, 0.78), rgba(10, 17, 31, 0.92));
+  box-shadow: var(--shadow-md);
+}
+
+.chart-card__body {
+  margin-top: 12px;
+  width: 100%;
+  height: 300px;
+}
+
+.recharts-default-tooltip {
+  border-radius: 14px !important;
+}
+
+@media (max-width: 1280px) {
+  .chart-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,12 +1,19 @@
 ﻿import { useEffect, useMemo, useState } from "react";
-import type { SuiteRun, TopRun } from "../shared/types/api";
+import type { SuiteRun, SuiteTickerResult, TopRun } from "../shared/types/api";
 import {
   loadSuiteRuns,
+  loadSuiteTickerResults,
   loadTopByReturn,
   loadTopDefenseReady,
 } from "../services/dataLoader";
-import { adaptSuiteRuns, adaptTopRuns } from "../services/adapters";
+import {
+  adaptSuiteRuns,
+  adaptSuiteTickerResults,
+  adaptTopRuns,
+} from "../services/adapters";
 import KpiCard from "../widgets/kpi/KpiCard";
+import SuiteReturnChart from "../widgets/charts/SuiteReturnChart";
+import SuiteRiskChart from "../widgets/charts/SuiteRiskChart";
 
 function fmt(value: number | null | undefined, digits = 2) {
   return typeof value === "number" ? value.toFixed(digits) : "—";
@@ -14,6 +21,7 @@ function fmt(value: number | null | undefined, digits = 2) {
 
 export default function OverviewPage() {
   const [suiteRuns, setSuiteRuns] = useState<SuiteRun[]>([]);
+  const [tickerRows, setTickerRows] = useState<SuiteTickerResult[]>([]);
   const [topReturn, setTopReturn] = useState<TopRun[]>([]);
   const [topDefense, setTopDefense] = useState<TopRun[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,13 +30,15 @@ export default function OverviewPage() {
     async function bootstrap() {
       setLoading(true);
 
-      const [suiteRaw, topReturnRaw, topDefenseRaw] = await Promise.all([
+      const [suiteRaw, tickerRaw, topReturnRaw, topDefenseRaw] = await Promise.all([
         loadSuiteRuns(),
+        loadSuiteTickerResults(),
         loadTopByReturn(),
         loadTopDefenseReady(),
       ]);
 
       setSuiteRuns(adaptSuiteRuns(suiteRaw));
+      setTickerRows(adaptSuiteTickerResults(tickerRaw));
       setTopReturn(adaptTopRuns(topReturnRaw));
       setTopDefense(adaptTopRuns(topDefenseRaw));
       setLoading(false);
@@ -72,8 +82,11 @@ export default function OverviewPage() {
         : values[mid];
     })();
 
-    const stages = Array.from(new Set(suiteRuns.map((r) => r.stage))).filter(Boolean);
     const configs = Array.from(new Set(suiteRuns.map((r) => r.config))).filter(Boolean);
+    const stages = Array.from(new Set(suiteRuns.map((r) => r.stage))).filter(Boolean);
+    const uniqueTickers = Array.from(new Set(tickerRows.map((r) => r.ticker))).filter(Boolean);
+
+    const okTickerRows = tickerRows.filter((r) => (r.status ?? "").toLowerCase() === "ok").length;
 
     return {
       runCount,
@@ -81,10 +94,12 @@ export default function OverviewPage() {
       bestDefenseRow,
       maxTickers,
       medianSharpe,
-      stages,
       configs,
+      stages,
+      uniqueTickers,
+      okTickerRows,
     };
-  }, [suiteRuns]);
+  }, [suiteRuns, tickerRows]);
 
   return (
     <div className="page">
@@ -145,13 +160,10 @@ export default function OverviewPage() {
         </div>
 
         <div className="snapshot-card">
-          <div className="snapshot-card__label">Best suite config</div>
-          <div className="snapshot-card__value">
-            {stats.bestReturnRow?.config ?? "—"}
-          </div>
+          <div className="snapshot-card__label">Ticker diagnostics</div>
+          <div className="snapshot-card__value">{stats.uniqueTickers.length}</div>
           <div className="snapshot-card__meta">
-            Return {fmt(stats.bestReturnRow?.return_metric_pct)}% • Sharpe{" "}
-            {fmt(stats.bestReturnRow?.sharpe, 4)}
+            {stats.okTickerRows} valid rows across suite-level ticker outputs
           </div>
         </div>
 
@@ -194,6 +206,11 @@ export default function OverviewPage() {
           hint="Tickers inside one suite run"
           accent="blue"
         />
+      </div>
+
+      <div className="chart-grid">
+        <SuiteReturnChart rows={suiteRuns} />
+        <SuiteRiskChart rows={suiteRuns} />
       </div>
 
       <div className="intelligence-grid intelligence-grid--overview">
