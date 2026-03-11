@@ -1210,3 +1210,15 @@ strong {
     width: 100%;
   }
 }
+
+.insight-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+
+@media (max-width: 1280px) {
+  .insight-grid {
+    grid-template-columns: 1fr;
+  }
+}

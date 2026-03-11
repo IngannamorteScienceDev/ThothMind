@@ -3,6 +3,8 @@ import type { SuiteTickerResult } from "../shared/types/api";
 import { loadSuiteTickerResults } from "../services/dataLoader";
 import { adaptSuiteTickerResults } from "../services/adapters";
 import TickerResultsTable from "../widgets/tables/TickerResultsTable";
+import TickerConfigComparisonChart from "../widgets/charts/TickerConfigComparisonChart";
+import TickerReturnDistributionChart from "../widgets/charts/TickerReturnDistributionChart";
 
 function fmt(value: number | null | undefined, digits = 2) {
   return typeof value === "number" ? value.toFixed(digits) : "—";
@@ -13,6 +15,7 @@ export default function TickerExplorerPage() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [configFilter, setConfigFilter] = useState("ALL");
+  const [tickerFilter, setTickerFilter] = useState("ALL");
 
   useEffect(() => {
     async function bootstrap() {
@@ -29,6 +32,10 @@ export default function TickerExplorerPage() {
     return ["ALL", ...Array.from(new Set(rows.map((r) => r.config))).sort()];
   }, [rows]);
 
+  const tickerOptions = useMemo(() => {
+    return ["ALL", ...Array.from(new Set(rows.map((r) => r.ticker))).sort()];
+  }, [rows]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
 
@@ -39,10 +46,22 @@ export default function TickerExplorerPage() {
         row.config.toLowerCase().includes(q);
 
       const configOk = configFilter === "ALL" || row.config === configFilter;
+      const tickerOk = tickerFilter === "ALL" || row.ticker === tickerFilter;
 
-      return queryOk && configOk;
+      return queryOk && configOk && tickerOk;
     });
-  }, [rows, query, configFilter]);
+  }, [rows, query, configFilter, tickerFilter]);
+
+  const comparisonTicker = useMemo(() => {
+    if (tickerFilter !== "ALL") return tickerFilter;
+    const first = filtered[0]?.ticker;
+    return first ?? "";
+  }, [filtered, tickerFilter]);
+
+  const comparisonRows = useMemo(() => {
+    if (!comparisonTicker) return [];
+    return rows.filter((row) => row.ticker === comparisonTicker);
+  }, [rows, comparisonTicker]);
 
   const stats = useMemo(() => {
     const uniqueTickers = new Set(filtered.map((r) => r.ticker)).size;
@@ -65,11 +84,20 @@ export default function TickerExplorerPage() {
             (b.strat_total_return ?? -Infinity) - (a.strat_total_return ?? -Infinity)
         )[0] ?? null;
 
+    const worstTicker =
+      filtered
+        .filter((r) => typeof r.strat_total_return === "number")
+        .sort(
+          (a, b) =>
+            (a.strat_total_return ?? Infinity) - (b.strat_total_return ?? Infinity)
+        )[0] ?? null;
+
     return {
       uniqueTickers,
       uniqueConfigs,
       avgSharpe,
       bestTicker,
+      worstTicker,
     };
   }, [filtered]);
 
@@ -142,6 +170,60 @@ export default function TickerExplorerPage() {
             </option>
           ))}
         </select>
+
+        <select
+          className="select-input"
+          value={tickerFilter}
+          onChange={(e) => setTickerFilter(e.target.value)}
+        >
+          {tickerOptions.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="chart-grid">
+        {comparisonTicker ? (
+          <TickerConfigComparisonChart rows={comparisonRows} ticker={comparisonTicker} />
+        ) : (
+          <div className="empty-state">No ticker selected for configuration comparison.</div>
+        )}
+
+        <TickerReturnDistributionChart rows={filtered} />
+      </div>
+
+      <div className="insight-grid">
+        <section className="terminal-card">
+          <div className="section-label">Research insight</div>
+          <h2 className="section-title">Configuration sensitivity</h2>
+          <p className="section-text">
+            The comparison block above is intended to show how the same instrument behaves
+            under different suite configurations. This is useful for demonstrating that the
+            system stores structured diagnostics rather than only one aggregate leaderboard.
+          </p>
+        </section>
+
+        <section className="terminal-card">
+          <div className="section-label">Research insight</div>
+          <h2 className="section-title">Distribution interpretation</h2>
+          <p className="section-text">
+            The histogram reveals whether performance is concentrated in a narrow set of
+            instruments or distributed more evenly across the filtered universe. This helps
+            distinguish broad robustness from isolated winners.
+          </p>
+        </section>
+
+        <section className="terminal-card">
+          <div className="section-label">Risk note</div>
+          <h2 className="section-title">Worst visible ticker</h2>
+          <p className="section-text">
+            {(stats.worstTicker?.ticker ?? "—")} under {(stats.worstTicker?.config ?? "—")} currently
+            shows return {fmt(stats.worstTicker?.strat_total_return)} and drawdown{" "}
+            {fmt(stats.worstTicker?.strat_max_drawdown)}.
+          </p>
+        </section>
       </div>
 
       {loading ? (
