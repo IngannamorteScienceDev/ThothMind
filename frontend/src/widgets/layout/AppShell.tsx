@@ -8,12 +8,14 @@ const navItems = [
   { to: "/", label: "Overview", end: true },
   { to: "/suite-runs", label: "Suite Runs" },
   { to: "/ticker-explorer", label: "Ticker Explorer" },
+  { to: "/insights", label: "Insights" },
   { to: "/methodology", label: "Methodology" },
 ];
 
 export default function AppShell() {
   const [suiteRuns, setSuiteRuns] = useState<SuiteRun[]>([]);
   const [tickerRows, setTickerRows] = useState<SuiteTickerResult[]>([]);
+  const [presentationMode, setPresentationMode] = useState(false);
 
   useEffect(() => {
     async function bootstrap() {
@@ -28,6 +30,13 @@ export default function AppShell() {
 
     bootstrap();
   }, []);
+
+  useEffect(() => {
+    document.body.classList.toggle("presentation-mode", presentationMode);
+    return () => {
+      document.body.classList.remove("presentation-mode");
+    };
+  }, [presentationMode]);
 
   const snapshot = useMemo(() => {
     const configs = new Set(suiteRuns.map((r) => r.config)).size;
@@ -114,6 +123,15 @@ export default function AppShell() {
             <span className="global-snapshot-chip__label">Tickers</span>
             <span className="global-snapshot-chip__value">{snapshot.tickerCount}</span>
           </div>
+
+          <button
+            type="button"
+            className="presentation-toggle"
+            onClick={() => setPresentationMode((v) => !v)}
+          >
+            {presentationMode ? "Exit presentation mode" : "Presentation mode"}
+          </button>
+
           <div className="global-snapshot-bar__mode">M8 true multi • curated demo universe</div>
         </div>
 

@@ -5,6 +5,7 @@ import SuiteRunsPage from "../pages/SuiteRunsPage";
 import SuiteDetailPage from "../pages/SuiteDetailPage";
 import TickerExplorerPage from "../pages/TickerExplorerPage";
 import MethodologyPage from "../pages/MethodologyPage";
+import InsightsPage from "../pages/InsightsPage";
 
 export const router = createBrowserRouter([
   {
@@ -15,6 +16,7 @@ export const router = createBrowserRouter([
       { path: "suite-runs", element: <SuiteRunsPage /> },
       { path: "suite-runs/:configId", element: <SuiteDetailPage /> },
       { path: "ticker-explorer", element: <TickerExplorerPage /> },
+      { path: "insights", element: <InsightsPage /> },
       { path: "methodology", element: <MethodologyPage /> },
     ],
   },
