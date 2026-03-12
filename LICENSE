@@ -1,0 +1,70 @@
+ThothMind — Intelligent Stock Market Analysis and Forecasting System
+PROPRIETARY LICENSE — ALL RIGHTS RESERVED
+
+Copyright (c) 2026 Arsenij Ingannamorte
+GitHub: @IngannamorteScienceDev (https://github.com/IngannamorteScienceDev)
+
+NO LICENSE GRANTED
+This repository and all associated materials (including but not limited to source code,
+documentation, specifications, UI/UX, datasets preprocessing logic, analytical outputs,
+images, text, diagrams, charts, configurations, and any other content)
+(the “Materials”) are proprietary. No permission or license is granted to any person
+to use, copy, modify, distribute, publish, sublicense, or otherwise exploit any
+portion of the Materials.
+
+NO IMPLIED RIGHTS
+No rights are granted by implication, estoppel, or otherwise. Any access to the
+repository via a hosting platform (e.g., GitHub) does not grant you any license to
+use the Materials. Any platform-level ability to view, fork, clone, or download the
+repository is governed solely by that platform’s terms and does not grant you any
+copyright license from the copyright holder.
+
+PERMITTED (VIEW-ONLY)
+You may view the Materials for informational purposes. No other rights are granted.
+
+PROHIBITED WITHOUT PRIOR WRITTEN PERMISSION
+Without explicit prior written permission from the copyright holder, you may not:
+
+- use the Materials in any way (commercial, educational, research, or otherwise);
+- copy, reproduce, store, or retain the Materials (in whole or in part) by any means;
+- modify, adapt, translate, or create derivative works based on the Materials;
+- distribute, publish, transmit, share, sublicense, or make available to any third party;
+- reuse any portion of the Materials as snippets, templates, libraries, datasets, models,
+  analytical artifacts, or training data;
+- use the Materials to create competing or derivative software, dashboards, research systems,
+  or financial analysis tools.
+
+Any use beyond view-only requires explicit prior written permission from the copyright
+holder.
+
+THIRD-PARTY MATERIALS
+This repository may reference or interact with third-party datasets, libraries, frameworks,
+and services. Such third-party components remain subject to their own respective licenses
+and terms. This license applies only to the proprietary Materials created for and contained
+in this repository, and does not grant any rights in third-party content.
+
+TRADEMARKS
+This license does not grant any rights in the names, logos, or trademarks associated
+with ThothMind or the copyright holder.
+
+PATENTS
+No patent rights are granted under this license.
+
+TERMINATION
+Any violation of this license automatically terminates any permissions that may have
+been granted, and you must immediately cease the prohibited activity and destroy any
+copies of the Materials in your possession or control.
+
+DISCLAIMER OF WARRANTIES
+THE MATERIALS ARE PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+LIMITATION OF LIABILITY
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
+LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE MATERIALS OR THE
+USE OR INABILITY TO USE THE MATERIALS.
+
+CONTACT
+To request permission, contact the copyright holder via GitHub: @IngannamorteScienceDev
