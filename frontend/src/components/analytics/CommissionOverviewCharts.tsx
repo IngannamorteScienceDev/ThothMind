@@ -2,28 +2,18 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
-  LabelList,
   ResponsiveContainer,
   Scatter,
   ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
+  ZAxis,
 } from "recharts";
-
-type SuiteRunRow = {
-  config: string;
-  return_metric_pct?: number;
-  sharpe?: number;
-  max_drawdown_pct?: number;
-  p_value_one_sided?: number;
-  actual_rel_return_pct?: number;
-  defense_ready_score?: number;
-};
+import type { SuiteRun } from "../../shared/types/api";
 
 type Props = {
-  suiteRuns: SuiteRunRow[];
+  suiteRuns: SuiteRun[];
 };
 
 function shortConfigName(config: string): string {
@@ -35,169 +25,172 @@ function shortConfigName(config: string): string {
     .replace("multiticker_suite", "base");
 }
 
-function fmt(value?: number, digits = 2): string {
-  if (value === undefined || value === null || Number.isNaN(value)) return "—";
-  return Number(value).toFixed(digits);
+function fmt(value: unknown, digits = 2): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value.toFixed(digits)
+    : "—";
 }
 
-const palette = ["#7dd3fc", "#67e8f9", "#a78bfa", "#fbbf24", "#34d399", "#fb7185"];
-
-export function CommissionOverviewCharts({ suiteRuns }: Props) {
-  const rows = [...suiteRuns];
-
-  const scatterRows = rows.map((row, idx) => ({
+export default function CommissionOverviewCharts({ suiteRuns }: Props) {
+  const rows = suiteRuns.map((row) => ({
     ...row,
     short: shortConfigName(row.config),
-    color: palette[idx % palette.length],
     absDd: Math.abs(row.max_drawdown_pct ?? 0),
+    bubble: Math.max(((row.defense_ready_score ?? 0) + 5) * 3, 80),
   }));
 
-  const benchmarkGapRows = rows.map((row) => ({
+  const benchmarkGapRows = suiteRuns.map((row) => ({
     short: shortConfigName(row.config),
+    config: row.config,
     gap: row.actual_rel_return_pct ?? 0,
   }));
 
-  const pValueRows = rows.map((row) => ({
+  const diagnosticsRows = suiteRuns.map((row) => ({
+    config: row.config,
     short: shortConfigName(row.config),
-    pValue: row.p_value_one_sided ?? 0,
+    pValue: row.p_value_one_sided ?? null,
     dd: Math.abs(row.max_drawdown_pct ?? 0),
+    sharpe: row.sharpe ?? null,
   }));
 
   return (
-    <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-      <section className="rounded-[28px] border border-white/10 bg-slate-950/40 p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] backdrop-blur">
-        <div className="mb-2 text-[11px] uppercase tracking-[0.28em] text-cyan-300/90">
-          performance map
-        </div>
-        <h3 className="mb-4 text-2xl font-semibold text-white">Return vs Sharpe</h3>
-        <div className="h-[320px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <ScatterChart margin={{ top: 16, right: 20, bottom: 16, left: 6 }}>
-              <CartesianGrid stroke="rgba(148,163,184,0.10)" />
-              <XAxis
-                type="number"
-                dataKey="sharpe"
-                stroke="rgba(226,232,240,0.7)"
-                tick={{ fill: "rgba(226,232,240,0.8)", fontSize: 12 }}
-                name="Sharpe"
-              />
-              <YAxis
-                type="number"
-                dataKey="return_metric_pct"
-                stroke="rgba(226,232,240,0.7)"
-                tick={{ fill: "rgba(226,232,240,0.8)", fontSize: 12 }}
-                name="Return %"
-              />
-              <Tooltip
-                cursor={{ strokeDasharray: "4 4" }}
-                contentStyle={{
-                  borderRadius: 16,
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(2,6,23,0.95)",
-                }}
-                formatter={(value: number, name: string) => [
-                  fmt(value),
-                  name === "return_metric_pct" ? "Return %" : "Sharpe",
-                ]}
-                labelFormatter={(_, payload) => payload?.[0]?.payload?.config ?? ""}
-              />
-              <Scatter data={scatterRows}>
-                {scatterRows.map((entry, index) => (
-                  <Cell key={`${entry.config}-${index}`} fill={entry.color} />
-                ))}
-              </Scatter>
-            </ScatterChart>
-          </ResponsiveContainer>
-        </div>
+    <div className="page" style={{ gap: 18 }}>
+      <section className="terminal-card terminal-card--featured">
+        <div className="section-label">Extended configuration analytics</div>
+        <h2 className="section-title">Comparative configuration diagnostics</h2>
+        <p className="section-text">
+          These additional charts extend the suite registry with a compact comparative
+          view of return, risk-adjusted quality, benchmark-relative performance, and
+          statistical diagnostics for the currently loaded experiment configurations.
+        </p>
       </section>
 
-      <section className="rounded-[28px] border border-white/10 bg-slate-950/40 p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] backdrop-blur">
-        <div className="mb-2 text-[11px] uppercase tracking-[0.28em] text-cyan-300/90">
-          benchmark comparison
+      <div className="chart-grid chart-grid--triple">
+        <div className="chart-card">
+          <div className="section-label">Performance map</div>
+          <h2 className="section-title">Return vs Sharpe</h2>
+          <div className="chart-card__body">
+            <ResponsiveContainer width="100%" height={320}>
+              <ScatterChart margin={{ top: 12, right: 12, bottom: 8, left: 8 }}>
+                <CartesianGrid stroke="rgba(155,168,199,0.12)" />
+                <XAxis
+                  type="number"
+                  dataKey="sharpe"
+                  name="Sharpe"
+                  tick={{ fill: "#9ba8c7", fontSize: 12 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  type="number"
+                  dataKey="return_metric_pct"
+                  name="Return"
+                  tick={{ fill: "#9ba8c7", fontSize: 12 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <ZAxis type="number" dataKey="bubble" range={[120, 420]} />
+                <Tooltip
+                  cursor={{ strokeDasharray: "4 4", stroke: "rgba(255,255,255,0.18)" }}
+                  contentStyle={{
+                    background: "rgba(10,17,31,0.95)",
+                    border: "1px solid rgba(114,138,190,0.18)",
+                    borderRadius: 14,
+                    color: "#f4f7ff",
+                  }}
+                  formatter={(value, name) => {
+                    if (String(name) === "Return") return [`${fmt(value)}%`, "Return"];
+                    return [fmt(value, 4), "Sharpe"];
+                  }}
+                  labelFormatter={(_, payload) => String(payload?.[0]?.payload?.config ?? "")}
+                />
+                <Scatter data={rows} fill="#70a5ff" />
+              </ScatterChart>
+            </ResponsiveContainer>
+          </div>
         </div>
-        <h3 className="mb-4 text-2xl font-semibold text-white">Excess return vs benchmark</h3>
-        <div className="h-[320px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={benchmarkGapRows} margin={{ top: 16, right: 12, left: 0, bottom: 16 }}>
-              <CartesianGrid stroke="rgba(148,163,184,0.10)" vertical={false} />
-              <XAxis
-                dataKey="short"
-                stroke="rgba(226,232,240,0.7)"
-                tick={{ fill: "rgba(226,232,240,0.8)", fontSize: 12 }}
-              />
-              <YAxis
-                stroke="rgba(226,232,240,0.7)"
-                tick={{ fill: "rgba(226,232,240,0.8)", fontSize: 12 }}
-              />
-              <Tooltip
-                contentStyle={{
-                  borderRadius: 16,
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(2,6,23,0.95)",
-                }}
-                formatter={(value: number) => [fmt(value), "Excess return %"]}
-              />
-              <Bar dataKey="gap" radius={[10, 10, 0, 0]} fill="url(#gapGradient)">
-                <LabelList dataKey="gap" position="top" formatter={(v: number) => fmt(v)} />
-              </Bar>
-              <defs>
-                <linearGradient id="gapGradient" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="#67e8f9" />
-                  <stop offset="100%" stopColor="#2563eb" />
-                </linearGradient>
-              </defs>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </section>
 
-      <section className="rounded-[28px] border border-white/10 bg-slate-950/40 p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] backdrop-blur">
-        <div className="mb-2 text-[11px] uppercase tracking-[0.28em] text-cyan-300/90">
-          statistical diagnostics
+        <div className="chart-card">
+          <div className="section-label">Benchmark comparison</div>
+          <h2 className="section-title">Excess return vs benchmark</h2>
+          <div className="chart-card__body">
+            <ResponsiveContainer width="100%" height={320}>
+              <BarChart data={benchmarkGapRows} margin={{ top: 12, right: 12, left: 0, bottom: 8 }}>
+                <CartesianGrid stroke="rgba(155,168,199,0.12)" vertical={false} />
+                <XAxis
+                  dataKey="short"
+                  tick={{ fill: "#9ba8c7", fontSize: 12 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fill: "#9ba8c7", fontSize: 12 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: "rgba(10,17,31,0.95)",
+                    border: "1px solid rgba(114,138,190,0.18)",
+                    borderRadius: 14,
+                    color: "#f4f7ff",
+                  }}
+                  formatter={(value) => [`${fmt(value)}%`, "Benchmark gap"]}
+                  labelFormatter={(_, payload) => String(payload?.[0]?.payload?.config ?? "")}
+                />
+                <Bar dataKey="gap" fill="#71e7dc" radius={[10, 10, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
-        <h3 className="mb-4 text-2xl font-semibold text-white">p-value and drawdown</h3>
-        <div className="space-y-4">
-          {pValueRows.map((row, idx) => (
-            <div key={row.short} className="rounded-2xl border border-white/8 bg-white/[0.02] p-4">
-              <div className="mb-2 flex items-center justify-between">
-                <div className="text-sm font-medium text-slate-200">{row.short}</div>
-                <div className="text-xs text-slate-400">
-                  p={fmt(row.pValue, 4)} · DD={fmt(row.dd)}%
+
+        <div className="chart-card">
+          <div className="section-label">Diagnostics summary</div>
+          <h2 className="section-title">p-value and drawdown overview</h2>
+          <div className="research-annotation-grid" style={{ marginTop: 12 }}>
+            {diagnosticsRows.map((row) => (
+              <div className="research-annotation" key={row.config}>
+                <div className="research-annotation__label">{row.short}</div>
+                <div className="research-annotation__text">
+                  p-value {fmt(row.pValue, 4)} • |drawdown| {fmt(row.dd)}% • Sharpe {fmt(row.sharpe, 4)}
+                </div>
+                <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+                  <div>
+                    <div className="research-annotation__label" style={{ marginBottom: 6 }}>
+                      p-value scale
+                    </div>
+                    <div style={{ height: 8, borderRadius: 999, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+                      <div
+                        style={{
+                          width: `${Math.max(3, Math.min(100, ((row.pValue ?? 0) / 1) * 100))}%`,
+                          height: "100%",
+                          borderRadius: 999,
+                          background: "linear-gradient(90deg, rgba(113,231,220,0.95), rgba(112,165,255,0.95))",
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="research-annotation__label" style={{ marginBottom: 6 }}>
+                      absolute drawdown scale
+                    </div>
+                    <div style={{ height: 8, borderRadius: 999, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+                      <div
+                        style={{
+                          width: `${Math.max(3, Math.min(100, (row.dd / 60) * 100))}%`,
+                          height: "100%",
+                          borderRadius: 999,
+                          background: "linear-gradient(90deg, rgba(255,191,117,0.95), rgba(255,154,154,0.95))",
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <div className="mb-1 text-[10px] uppercase tracking-[0.22em] text-slate-500">
-                    p-value
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-800">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${Math.max(2, Math.min(100, row.pValue * 100))}%`,
-                        background: palette[idx % palette.length],
-                      }}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <div className="mb-1 text-[10px] uppercase tracking-[0.22em] text-slate-500">
-                    |drawdown|
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-800">
-                    <div
-                      className="h-full rounded-full bg-amber-300"
-                      style={{
-                        width: `${Math.max(2, Math.min(100, (row.dd / 50) * 100))}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </section>
+      </div>
     </div>
   );
 }

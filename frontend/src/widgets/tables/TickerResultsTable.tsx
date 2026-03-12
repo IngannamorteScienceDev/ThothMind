@@ -15,13 +15,20 @@ function statusTone(value: string | undefined) {
   return "badge";
 }
 
+function pValueTone(value: number | null | undefined) {
+  if (typeof value !== "number") return "";
+  if (value <= 0.1) return "tone-positive";
+  if (value <= 0.25) return "tone-calm";
+  return "tone-warn";
+}
+
 export default function TickerResultsTable({ rows }: Props) {
   return (
     <div className="table-card table-card--terminal">
       <div className="table-card__header">
         <div>
           <div className="section-label">Instrument diagnostics</div>
-          <div className="table-card__title">Per-ticker suite analytics</div>
+          <div className="table-card__title">Per-instrument analytical output</div>
         </div>
         <div className="table-card__meta">{rows.length} rows visible</div>
       </div>
@@ -30,13 +37,13 @@ export default function TickerResultsTable({ rows }: Props) {
         <table className="tm-table tm-table--terminal">
           <thead>
             <tr>
-              <th>Config</th>
-              <th>Ticker</th>
+              <th>Configuration</th>
+              <th>Instrument</th>
               <th>Status</th>
-              <th>Return</th>
+              <th>Return %</th>
               <th>Sharpe</th>
-              <th>Max DD</th>
-              <th>Actual Rel Return</th>
+              <th>Max Drawdown %</th>
+              <th>Benchmark Gap %</th>
               <th>p-value</th>
             </tr>
           </thead>
@@ -56,7 +63,9 @@ export default function TickerResultsTable({ rows }: Props) {
                 <td className="num-cell">{fmt(row.strat_sharpe, 4)}</td>
                 <td className="num-cell">{fmt(row.strat_max_drawdown)}</td>
                 <td className="num-cell">{fmt(row.actual_rel_return)}</td>
-                <td className="num-cell">{fmt(row.p_value_one_sided, 4)}</td>
+                <td className={`num-cell ${pValueTone(row.p_value_one_sided ?? null)}`}>
+                  {fmt(row.p_value_one_sided, 4)}
+                </td>
               </tr>
             ))}
           </tbody>

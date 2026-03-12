@@ -27,6 +27,12 @@ function shortConfigName(value: string) {
     .replace(".yaml", "");
 }
 
+function fmtNumber(value: unknown, digits = 2) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value.toFixed(digits)
+    : "—";
+}
+
 export default function SuiteReturnChart({ rows }: Props) {
   const data = rows.map((row) => ({
     name: shortConfigName(row.config),
@@ -61,9 +67,9 @@ export default function SuiteReturnChart({ rows }: Props) {
                 borderRadius: 14,
                 color: "#f4f7ff",
               }}
-              formatter={(value: number) => [`${value.toFixed(2)}%`, "Return"]}
+              formatter={(value) => [`${fmtNumber(value)}%`, "Return"]}
               labelFormatter={(_, payload) =>
-                payload?.[0]?.payload?.fullName ?? ""
+                String(payload?.[0]?.payload?.fullName ?? "")
               }
             />
             <Bar dataKey="value" radius={[10, 10, 0, 0]}>

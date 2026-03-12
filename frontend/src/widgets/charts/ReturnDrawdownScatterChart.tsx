@@ -27,6 +27,12 @@ function shortConfigName(value: string) {
     .replace(".yaml", "");
 }
 
+function fmtNumber(value: unknown, digits = 2) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value.toFixed(digits)
+    : "—";
+}
+
 export default function ReturnDrawdownScatterChart({ rows }: Props) {
   const data = rows.map((row) => ({
     name: shortConfigName(row.config),
@@ -70,12 +76,14 @@ export default function ReturnDrawdownScatterChart({ rows }: Props) {
                 borderRadius: 14,
                 color: "#f4f7ff",
               }}
-              formatter={(value: number, name: string) => {
-                if (name === "Return") return [`${value.toFixed(2)}%`, "Return"];
-                if (name === "Abs drawdown") return [`${value.toFixed(2)}%`, "Abs drawdown"];
-                return [value, name];
+              formatter={(value, name) => {
+                if (String(name) === "Return") return [`${fmtNumber(value)}%`, "Return"];
+                if (String(name) === "Abs drawdown") {
+                  return [`${fmtNumber(value)}%`, "Abs drawdown"];
+                }
+                return [fmtNumber(value, 4), String(name)];
               }}
-              labelFormatter={(_, payload) => payload?.[0]?.payload?.fullName ?? ""}
+              labelFormatter={(_, payload) => String(payload?.[0]?.payload?.fullName ?? "")}
             />
             <Scatter data={data} fill="#70a5ff" />
           </ScatterChart>

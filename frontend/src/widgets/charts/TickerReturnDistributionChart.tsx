@@ -30,6 +30,12 @@ function buildHistogram(values: number[]) {
   }));
 }
 
+function fmtInteger(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value.toFixed(0)
+    : "—";
+}
+
 export default function TickerReturnDistributionChart({ rows }: Props) {
   const values = rows
     .map((row) => row.strat_total_return)
@@ -40,7 +46,7 @@ export default function TickerReturnDistributionChart({ rows }: Props) {
   return (
     <div className="chart-card">
       <div className="section-label">Distribution</div>
-      <h2 className="section-title">Per-ticker return distribution</h2>
+      <h2 className="section-title">Per-instrument return distribution</h2>
       <div className="chart-card__body">
         <ResponsiveContainer width="100%" height={300}>
           <BarChart data={data} barCategoryGap={18}>
@@ -64,7 +70,7 @@ export default function TickerReturnDistributionChart({ rows }: Props) {
                 borderRadius: 14,
                 color: "#f4f7ff",
               }}
-              formatter={(value: number) => [value, "Tickers"]}
+              formatter={(value) => [fmtInteger(value), "Instruments"]}
             />
             <Bar dataKey="count" fill="#71e7dc" radius={[10, 10, 0, 0]} />
           </BarChart>

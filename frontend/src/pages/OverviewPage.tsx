@@ -17,6 +17,7 @@ import {
   adaptSuiteTickerResults,
   adaptTopRuns,
 } from "../services/adapters";
+import CommissionOverviewCharts from "../components/analytics/CommissionOverviewCharts";
 import KpiCard from "../widgets/kpi/KpiCard";
 import SuiteReturnChart from "../widgets/charts/SuiteReturnChart";
 import SuiteRiskChart from "../widgets/charts/SuiteRiskChart";
@@ -322,6 +323,8 @@ export default function OverviewPage() {
         <SuiteRiskChart rows={suiteRuns} />
         <ReturnDrawdownScatterChart rows={suiteRuns} />
       </div>
+
+      <CommissionOverviewCharts suiteRuns={suiteRuns} />
 
       <div className="intelligence-grid intelligence-grid--overview">
         <section className="terminal-card terminal-card--featured">

@@ -2,6 +2,7 @@
 import type { SuiteTickerResult } from "../shared/types/api";
 import { loadSuiteTickerResults } from "../services/dataLoader";
 import { adaptSuiteTickerResults } from "../services/adapters";
+import CommissionTickerCharts from "../components/analytics/CommissionTickerCharts";
 import TickerResultsTable from "../widgets/tables/TickerResultsTable";
 import TickerConfigComparisonChart from "../widgets/charts/TickerConfigComparisonChart";
 import TickerReturnDistributionChart from "../widgets/charts/TickerReturnDistributionChart";
@@ -209,6 +210,8 @@ export default function TickerExplorerPage() {
 
         <TickerReturnDistributionChart rows={filtered} />
       </div>
+
+      <CommissionTickerCharts tickerRows={filtered} />
 
       <div className="insight-grid">
         <section className="terminal-card">

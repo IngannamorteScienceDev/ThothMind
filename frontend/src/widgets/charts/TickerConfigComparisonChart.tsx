@@ -24,6 +24,12 @@ function shortConfigName(value: string) {
     .replace(".yaml", "");
 }
 
+function fmtNumber(value: unknown, digits = 2) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value.toFixed(digits)
+    : "—";
+}
+
 export default function TickerConfigComparisonChart({ rows, ticker }: Props) {
   const data = rows
     .filter((row) => row.ticker === ticker)
@@ -36,7 +42,7 @@ export default function TickerConfigComparisonChart({ rows, ticker }: Props) {
 
   return (
     <div className="chart-card">
-      <div className="section-label">Ticker comparison</div>
+      <div className="section-label">Instrument comparison</div>
       <h2 className="section-title">Configuration sensitivity for {ticker}</h2>
       <div className="chart-card__body">
         <ResponsiveContainer width="100%" height={300}>
@@ -61,12 +67,12 @@ export default function TickerConfigComparisonChart({ rows, ticker }: Props) {
                 borderRadius: 14,
                 color: "#f4f7ff",
               }}
-              formatter={(value: number, name: string) => {
-                if (name === "returnValue") return [`${value.toFixed(2)}%`, "Return"];
-                if (name === "sharpeValue") return [value.toFixed(4), "Sharpe"];
-                return [value, name];
+              formatter={(value, name) => {
+                if (String(name) === "returnValue") return [`${fmtNumber(value)}%`, "Return"];
+                if (String(name) === "sharpeValue") return [fmtNumber(value, 4), "Sharpe"];
+                return [fmtNumber(value), String(name)];
               }}
-              labelFormatter={(_, payload) => payload?.[0]?.payload?.fullName ?? ""}
+              labelFormatter={(_, payload) => String(payload?.[0]?.payload?.fullName ?? "")}
             />
             <Bar dataKey="returnValue" radius={[10, 10, 0, 0]}>
               {data.map((_, index) => (

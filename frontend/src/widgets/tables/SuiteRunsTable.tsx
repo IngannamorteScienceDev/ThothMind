@@ -28,8 +28,8 @@ export default function SuiteRunsTable({ rows }: Props) {
     <div className="table-card table-card--terminal">
       <div className="table-card__header">
         <div>
-          <div className="section-label">Suite registry</div>
-          <div className="table-card__title">Multi-ticker experiment catalog</div>
+          <div className="section-label">Experiment registry</div>
+          <div className="table-card__title">Suite-level experiment comparison</div>
         </div>
         <div className="table-card__meta">{rows.length} suite runs loaded</div>
       </div>
@@ -38,16 +38,16 @@ export default function SuiteRunsTable({ rows }: Props) {
         <table className="tm-table tm-table--terminal">
           <thead>
             <tr>
-              <th>Config</th>
-              <th>Ticker</th>
+              <th>Configuration</th>
+              <th>Anchor Ticker</th>
               <th>Stage</th>
               <th>Mode</th>
               <th>Universe</th>
               <th>Return %</th>
               <th>Sharpe</th>
-              <th>Max DD %</th>
+              <th>Max Drawdown %</th>
               <th>p-value</th>
-              <th>Defense</th>
+              <th>Composite Score</th>
             </tr>
           </thead>
           <tbody>
@@ -59,7 +59,7 @@ export default function SuiteRunsTable({ rows }: Props) {
                     className="detail-link"
                   >
                     <div className="cell-primary">{row.config}</div>
-                    <div className="cell-secondary">Open suite detail →</div>
+                    <div className="cell-secondary">Open configuration detail →</div>
                   </Link>
                 </td>
                 <td>

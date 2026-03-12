@@ -2,25 +2,15 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
-
-type TickerRow = {
-  ticker: string;
-  config: string;
-  strat_total_return?: number;
-  strat_sharpe?: number;
-  strat_max_drawdown?: number;
-  actual_rel_return?: number;
-  p_value_one_sided?: number;
-};
+import type { SuiteTickerResult } from "../../shared/types/api";
 
 type Props = {
-  tickerRows: TickerRow[];
+  tickerRows: SuiteTickerResult[];
 };
 
 function shortConfigName(config: string): string {
@@ -32,15 +22,16 @@ function shortConfigName(config: string): string {
     .replace("multiticker_suite", "base");
 }
 
-function fmt(value?: number, digits = 2): string {
-  if (value === undefined || value === null || Number.isNaN(value)) return "—";
-  return Number(value).toFixed(digits);
+function fmt(value: unknown, digits = 2): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value.toFixed(digits)
+    : "—";
 }
 
-export function CommissionTickerCharts({ tickerRows }: Props) {
+export default function CommissionTickerCharts({ tickerRows }: Props) {
   const grouped = new Map<
     string,
-    { ticker: string; bestGap: number; avgSharpe: number; worstDd: number; count: number }
+    { ticker: string; bestGap: number; avgSharpe: number; avgReturn: number; worstDd: number; count: number }
   >();
 
   for (const row of tickerRows) {
@@ -48,12 +39,14 @@ export function CommissionTickerCharts({ tickerRows }: Props) {
       ticker: row.ticker,
       bestGap: Number.NEGATIVE_INFINITY,
       avgSharpe: 0,
+      avgReturn: 0,
       worstDd: 0,
       count: 0,
     };
 
-    current.bestGap = Math.max(current.bestGap, row.actual_rel_return ?? -9999);
+    current.bestGap = Math.max(current.bestGap, row.actual_rel_return ?? Number.NEGATIVE_INFINITY);
     current.avgSharpe += row.strat_sharpe ?? 0;
+    current.avgReturn += row.strat_total_return ?? 0;
     current.worstDd = Math.min(current.worstDd, row.strat_max_drawdown ?? 0);
     current.count += 1;
 
@@ -62,18 +55,14 @@ export function CommissionTickerCharts({ tickerRows }: Props) {
 
   const aggregated = Array.from(grouped.values()).map((row) => ({
     ticker: row.ticker,
-    bestGap: row.bestGap,
+    bestGap: Number.isFinite(row.bestGap) ? row.bestGap : 0,
     avgSharpe: row.count ? row.avgSharpe / row.count : 0,
+    avgReturn: row.count ? row.avgReturn / row.count : 0,
     worstDd: row.worstDd,
   }));
 
-  const topTickers = [...aggregated]
-    .sort((a, b) => b.bestGap - a.bestGap)
-    .slice(0, 12);
-
-  const bottomTickers = [...aggregated]
-    .sort((a, b) => a.bestGap - b.bestGap)
-    .slice(0, 12);
+  const topTickers = [...aggregated].sort((a, b) => b.bestGap - a.bestGap).slice(0, 10);
+  const bottomTickers = [...aggregated].sort((a, b) => a.bestGap - b.bestGap).slice(0, 10);
 
   const configAgg = new Map<string, { config: string; avgReturn: number; avgSharpe: number; n: number }>();
   for (const row of tickerRows) {
@@ -92,118 +81,124 @@ export function CommissionTickerCharts({ tickerRows }: Props) {
   }));
 
   return (
-    <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-      <section className="rounded-[28px] border border-white/10 bg-slate-950/40 p-6 backdrop-blur">
-        <div className="mb-2 text-[11px] uppercase tracking-[0.28em] text-cyan-300/90">
-          leaders
-        </div>
-        <h3 className="mb-4 text-2xl font-semibold text-white">Top benchmark outperformers</h3>
-        <div className="h-[340px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={topTickers} layout="vertical" margin={{ top: 6, right: 12, left: 8, bottom: 6 }}>
-              <CartesianGrid stroke="rgba(148,163,184,0.10)" horizontal={false} />
-              <XAxis
-                type="number"
-                stroke="rgba(226,232,240,0.7)"
-                tick={{ fill: "rgba(226,232,240,0.8)", fontSize: 12 }}
-              />
-              <YAxis
-                type="category"
-                dataKey="ticker"
-                width={56}
-                stroke="rgba(226,232,240,0.7)"
-                tick={{ fill: "rgba(226,232,240,0.8)", fontSize: 12 }}
-              />
-              <Tooltip
-                contentStyle={{
-                  borderRadius: 16,
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(2,6,23,0.95)",
-                }}
-                formatter={(v: number) => [fmt(v), "Excess return %"]}
-              />
-              <Bar dataKey="bestGap" radius={[0, 12, 12, 0]} fill="#34d399" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+    <div className="page" style={{ gap: 18 }}>
+      <section className="terminal-card terminal-card--featured">
+        <div className="section-label">Extended instrument analytics</div>
+        <h2 className="section-title">Cross-instrument comparison layer</h2>
+        <p className="section-text">
+          These charts expand ticker-level diagnostics beyond a single selected
+          instrument. They reveal which instruments show the strongest benchmark gap,
+          where the weakest relative behavior is concentrated, and how average
+          configuration performance behaves across the currently filtered universe.
+        </p>
       </section>
 
-      <section className="rounded-[28px] border border-white/10 bg-slate-950/40 p-6 backdrop-blur">
-        <div className="mb-2 text-[11px] uppercase tracking-[0.28em] text-cyan-300/90">
-          laggards
+      <div className="chart-grid chart-grid--triple">
+        <div className="chart-card">
+          <div className="section-label">Leaders</div>
+          <h2 className="section-title">Top benchmark outperformers</h2>
+          <div className="chart-card__body">
+            <ResponsiveContainer width="100%" height={340}>
+              <BarChart data={topTickers} layout="vertical" margin={{ top: 6, right: 12, left: 8, bottom: 6 }}>
+                <CartesianGrid stroke="rgba(155,168,199,0.12)" horizontal={false} />
+                <XAxis
+                  type="number"
+                  tick={{ fill: "#9ba8c7", fontSize: 12 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="ticker"
+                  width={56}
+                  tick={{ fill: "#9ba8c7", fontSize: 12 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: "rgba(10,17,31,0.95)",
+                    border: "1px solid rgba(114,138,190,0.18)",
+                    borderRadius: 14,
+                    color: "#f4f7ff",
+                  }}
+                  formatter={(value) => [`${fmt(value)}%`, "Benchmark gap"]}
+                />
+                <Bar dataKey="bestGap" radius={[0, 10, 10, 0]} fill="#77e0a7" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
-        <h3 className="mb-4 text-2xl font-semibold text-white">Weakest benchmark gaps</h3>
-        <div className="h-[340px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={bottomTickers} layout="vertical" margin={{ top: 6, right: 12, left: 8, bottom: 6 }}>
-              <CartesianGrid stroke="rgba(148,163,184,0.10)" horizontal={false} />
-              <XAxis
-                type="number"
-                stroke="rgba(226,232,240,0.7)"
-                tick={{ fill: "rgba(226,232,240,0.8)", fontSize: 12 }}
-              />
-              <YAxis
-                type="category"
-                dataKey="ticker"
-                width={56}
-                stroke="rgba(226,232,240,0.7)"
-                tick={{ fill: "rgba(226,232,240,0.8)", fontSize: 12 }}
-              />
-              <Tooltip
-                contentStyle={{
-                  borderRadius: 16,
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(2,6,23,0.95)",
-                }}
-                formatter={(v: number) => [fmt(v), "Excess return %"]}
-              />
-              <Bar dataKey="bestGap" radius={[0, 12, 12, 0]} fill="#fb7185" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </section>
 
-      <section className="rounded-[28px] border border-white/10 bg-slate-950/40 p-6 backdrop-blur">
-        <div className="mb-2 text-[11px] uppercase tracking-[0.28em] text-cyan-300/90">
-          configuration profile
+        <div className="chart-card">
+          <div className="section-label">Laggards</div>
+          <h2 className="section-title">Weakest benchmark gaps</h2>
+          <div className="chart-card__body">
+            <ResponsiveContainer width="100%" height={340}>
+              <BarChart data={bottomTickers} layout="vertical" margin={{ top: 6, right: 12, left: 8, bottom: 6 }}>
+                <CartesianGrid stroke="rgba(155,168,199,0.12)" horizontal={false} />
+                <XAxis
+                  type="number"
+                  tick={{ fill: "#9ba8c7", fontSize: 12 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="ticker"
+                  width={56}
+                  tick={{ fill: "#9ba8c7", fontSize: 12 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: "rgba(10,17,31,0.95)",
+                    border: "1px solid rgba(114,138,190,0.18)",
+                    borderRadius: 14,
+                    color: "#f4f7ff",
+                  }}
+                  formatter={(value) => [`${fmt(value)}%`, "Benchmark gap"]}
+                />
+                <Bar dataKey="bestGap" radius={[0, 10, 10, 0]} fill="#ff9a9a" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
-        <h3 className="mb-4 text-2xl font-semibold text-white">Average return by configuration</h3>
-        <div className="h-[340px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={configRows} margin={{ top: 12, right: 12, left: 0, bottom: 18 }}>
-              <CartesianGrid stroke="rgba(148,163,184,0.10)" vertical={false} />
-              <XAxis
-                dataKey="config"
-                stroke="rgba(226,232,240,0.7)"
-                tick={{ fill: "rgba(226,232,240,0.8)", fontSize: 12 }}
-              />
-              <YAxis
-                stroke="rgba(226,232,240,0.7)"
-                tick={{ fill: "rgba(226,232,240,0.8)", fontSize: 12 }}
-              />
-              <Tooltip
-                contentStyle={{
-                  borderRadius: 16,
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(2,6,23,0.95)",
-                }}
-                formatter={(v: number, n: string) => [
-                  fmt(v),
-                  n === "avgReturn" ? "Average return %" : "Average Sharpe",
-                ]}
-              />
-              <Bar dataKey="avgReturn" radius={[12, 12, 0, 0]}>
-                {configRows.map((_, idx) => (
-                  <Cell
-                    key={idx}
-                    fill={["#7dd3fc", "#67e8f9", "#a78bfa", "#fbbf24", "#34d399", "#fb7185"][idx % 6]}
-                  />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+
+        <div className="chart-card">
+          <div className="section-label">Configuration profile</div>
+          <h2 className="section-title">Average return by configuration</h2>
+          <div className="chart-card__body">
+            <ResponsiveContainer width="100%" height={340}>
+              <BarChart data={configRows} margin={{ top: 12, right: 12, left: 0, bottom: 18 }}>
+                <CartesianGrid stroke="rgba(155,168,199,0.12)" vertical={false} />
+                <XAxis
+                  dataKey="config"
+                  tick={{ fill: "#9ba8c7", fontSize: 12 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fill: "#9ba8c7", fontSize: 12 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: "rgba(10,17,31,0.95)",
+                    border: "1px solid rgba(114,138,190,0.18)",
+                    borderRadius: 14,
+                    color: "#f4f7ff",
+                  }}
+                  formatter={(value) => [`${fmt(value)}%`, "Average return"]}
+                />
+                <Bar dataKey="avgReturn" radius={[10, 10, 0, 0]} fill="#70a5ff" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
-      </section>
+      </div>
     </div>
   );
 }
