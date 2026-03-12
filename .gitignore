@@ -1,67 +1,177 @@
-# Byte-compiled / optimized / DLL files
+# =========================
+# OS / Editor
+# =========================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml
+*.suo
+*.user
+*.userossc
+*.sln.docstates
+*.swp
+*.swo
+*~
+
+# =========================
+# Python
+# =========================
 __pycache__/
 *.py[cod]
-*.so
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.eggs/
+*.egg
+*.egg-info/
+pip-wheel-metadata/
 
 # Virtual environments
-env/
-venv/
 .venv/
+venv/
+env/
 ENV/
-env.bak/
 
-# Jupyter Notebook checkpoints
-.ipynb_checkpoints
+# Jupyter
+.ipynb_checkpoints/
 
-# VS Code
-.vscode/
+# =========================
+# Node / Frontend
+# =========================
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.vite/
+frontend/.cache/
+frontend/.eslintcache
+*.tsbuildinfo
 
-# PyCharm
-.idea/
-*.iml
-
-# Logs and reports
+# =========================
+# Logs / Temp
+# =========================
 *.log
 *.out
 *.err
 *.tmp
+*.temp
 *.bak
 
-# System files
-.DS_Store
-Thumbs.db
-
-# Cache
-*.cache
-*.pkl
-*.joblib
-
-# Data
-/data/*.csv
-/data/*.xlsx
-/data/*.zip
-/data/*.json
-/data/*.parquet
-
-# Models
-/models/*.h5
-/models/*.pt
-/models/*.pkl
-/models/*.joblib
-
-# Streamlit secrets
+# =========================
+# Local env / secrets
+# =========================
+.env
+.env.*
+!.env.example
 .streamlit/secrets.toml
 
-# Mac system
-*.DS_Store
+# =========================
+# Generated backend artifacts
+# =========================
+reports/runs/
+reports/index/
+reports/showcase/
+reports/logs/batch/
+reports/universe_selection/
+reports/batch_state*.jsonl
 
-# Python environment files
-pip-log.txt
-pip-delete-this-directory.txt
+# Keep scaffold folders, ignore generated contents
+reports/csv/*
+!reports/csv/.gitkeep
 
-# Jupyter lab state
-.lab/
-/reports
-/data_curated
-/configs/_batch_tmp
+reports/plots/*
+!reports/plots/.gitkeep
+
+reports/summary/*
+!reports/summary/.gitkeep
+
+reports/ablation/*
+!reports/ablation/.gitkeep
+
+reports/logs/*
+!reports/logs/.gitkeep
+
+# =========================
+# Temporary configs
+# =========================
+configs/_batch_tmp/
+configs/_tmp_active.yaml
+
+# =========================
+# Frontend data snapshots
+# =========================
+
+# Current public demo dataset should remain committable
+# frontend/public/data/demo/  -> intentionally NOT ignored
+
+# Local research snapshot published from backend
+frontend/public/data/research/
+
+# Deprecated flat frontend data structure
+frontend/public/data/index/
+frontend/public/data/meta/
+frontend/public/data/showcase/
+
+# =========================
+# Raw market data
+# =========================
+data/Stocks/
+data/ETFs/
+
+# Optional placeholder exceptions if you add them later
+!data/Stocks/.gitkeep
+!data/ETFs/.gitkeep
+
+# =========================
+# Curated universes
+# =========================
+
+# Generic local curated outputs
+data_curated/
+data_curated_*/
+
+# Keep the portable curated demo subset in git
+!data_curated_demo_30s_10e/
+!data_curated_demo_30s_10e/**
+
+# =========================
+# Python / ML artifacts
+# =========================
+*.pkl
+*.joblib
+*.pickle
+*.h5
+*.pt
+*.onnx
+
+# =========================
+# Archives
+# =========================
+*.zip
+*.rar
+*.7z
+*.tar
+*.gz
+
+# Raw market data
+data/Stocks/
+data/ETFs/
+!data/Stocks/.gitkeep
+!data/ETFs/.gitkeep
+
+# Generic local curated datasets
+data_curated/
+data_curated_*/
+
+# Keep portable demo curated subset
+!data_curated_demo_30s_10e/
+!data_curated_demo_30s_10e/**
+
 /data_curated_demo_30s_10e
