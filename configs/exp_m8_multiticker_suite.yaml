@@ -1,0 +1,70 @@
+pipeline:
+  stage: "m8"
+
+run:
+  name: "exp_m8_multiticker_conformal90_bootstrap"
+  seed: 42
+  output_dir: "reports/runs"
+
+suite:
+  tickers: ["SPY", "QQQ", "IWM", "EFA", "EEM", "TLT", "GLD", "VNQ"]
+  # Если хочешь больше: добавим XLV, XLE, LQD и т.д.
+
+data:
+  base_path: "data"
+  ticker: "SPY"   # не важно для suite, но пусть будет валидно
+  start: null
+  end: null
+
+features:
+  horizon: 1
+  sma_windows: [5, 20, 50, 200]
+  vol_windows: [10, 20, 60]
+  lags: [1, 5, 20]
+
+regimes:
+  vol_window: 20
+  vol_median_window: 252
+  trend_sma_window: 200
+
+walkforward:
+  train_size: 756
+  test_size: 63
+  step: 63
+
+model:
+  random_state: 42
+  n_estimators: 600
+  max_depth: 4
+  learning_rate: 0.03
+  subsample: 0.8
+  colsample_bytree: 0.8
+  reg_lambda: 1.0
+  min_child_weight: 1.0
+
+conformal:
+  alpha: 0.10
+  calib_size: 252
+  min_calib: 126
+
+allocation:
+  low_exposure: 0.15
+  mid_exposure: 0.35
+  high_exposure: 0.35
+  min_hold_days: 5
+
+bootstrap:
+  n_boot: 2000     # для suite дефолт. Хочешь “ультра” — ставь 5000
+  block_len: 20
+  ci_alpha: 0.05
+  seed: 42
+
+costs:
+  commission_bps: 2.0
+  slippage_bps: 1.0
+  slippage_vol_k: 10.0
+
+sim:
+  initial_equity: 1.0
+  execution_lag: 1
+
