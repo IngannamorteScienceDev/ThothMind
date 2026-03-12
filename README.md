@@ -20,8 +20,6 @@ ThothMind is designed not as a toy notebook or a one-off dashboard, but as a **s
 
 ## Interface preview
 
-> Replace the image paths below with your actual screenshots, for example from `docs/assets/...`.
-
 ![ThothMind Overview](docs/assets/overview-main.png)
 
 <div align="center">
