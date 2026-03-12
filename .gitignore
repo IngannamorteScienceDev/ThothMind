@@ -55,7 +55,7 @@ frontend/.eslintcache
 *.tsbuildinfo
 
 # =========================
-# Logs / Temp
+# Logs / Temp / Backups
 # =========================
 *.log
 *.out
@@ -82,7 +82,7 @@ reports/logs/batch/
 reports/universe_selection/
 reports/batch_state*.jsonl
 
-# Keep scaffold folders, ignore generated contents
+# Keep scaffold folders if they are used with .gitkeep
 reports/csv/*
 !reports/csv/.gitkeep
 
@@ -108,8 +108,8 @@ configs/_tmp_active.yaml
 # Frontend data snapshots
 # =========================
 
-# Current public demo dataset should remain committable
-# frontend/public/data/demo/  -> intentionally NOT ignored
+# Public demo dataset stays in git
+# frontend/public/data/demo/  <-- intentionally NOT ignored
 
 # Local research snapshot published from backend
 frontend/public/data/research/
@@ -124,20 +124,16 @@ frontend/public/data/showcase/
 # =========================
 data/Stocks/
 data/ETFs/
-
-# Optional placeholder exceptions if you add them later
 !data/Stocks/.gitkeep
 !data/ETFs/.gitkeep
 
 # =========================
-# Curated universes
+# Curated datasets
 # =========================
-
-# Generic local curated outputs
 data_curated/
 data_curated_*/
 
-# Keep the portable curated demo subset in git
+# Keep portable demo curated subset
 !data_curated_demo_30s_10e/
 !data_curated_demo_30s_10e/**
 
@@ -159,19 +155,4 @@ data_curated_*/
 *.7z
 *.tar
 *.gz
-
-# Raw market data
-data/Stocks/
-data/ETFs/
-!data/Stocks/.gitkeep
-!data/ETFs/.gitkeep
-
-# Generic local curated datasets
-data_curated/
-data_curated_*/
-
-# Keep portable demo curated subset
-!data_curated_demo_30s_10e/
-!data_curated_demo_30s_10e/**
-
 /data_curated_demo_30s_10e
