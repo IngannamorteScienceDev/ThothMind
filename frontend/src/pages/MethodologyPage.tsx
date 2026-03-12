@@ -31,13 +31,13 @@ export default function MethodologyPage() {
     <div className="page">
       <section className="section-hero">
         <div className="section-hero__content">
-          <div className="section-label">System methodology</div>
+          <div className="section-label">Architecture and methodology</div>
           <h1 className="section-hero__title">How ThothMind Works</h1>
           <p className="section-hero__text">
-            ThothMind is structured as an offline-first research system. It builds a
-            curated instrument universe, executes precomputed multi-ticker experiments,
-            aggregates suite-level and per-ticker metrics, and exposes the results through
-            an analytical interface designed for interpretation and defense presentation.
+            ThothMind is built as an offline analytical system. It selects a curated
+            instrument universe, executes multi-ticker experiments, aggregates
+            configuration-level and ticker-level metrics, and publishes the results to a
+            frontend layer intended for comparison, interpretation, and demonstration.
           </p>
         </div>
 
@@ -64,7 +64,7 @@ export default function MethodologyPage() {
             <h2 className="section-title">Freshness and dataset provenance</h2>
           </div>
           <div className="dataset-status">
-            {manifest ? "curated manifest loaded" : "manifest missing"}
+            {manifest ? "manifest available" : "manifest missing"}
           </div>
         </div>
 
@@ -79,7 +79,9 @@ export default function MethodologyPage() {
           </div>
           <div className="dataset-metric">
             <div className="dataset-metric__label">Expected</div>
-            <div className="dataset-metric__value">{manifest?.total_expected ?? "—"}</div>
+            <div className="dataset-metric__value">
+              {manifest?.total_expected ?? "—"}
+            </div>
           </div>
           <div className="dataset-metric">
             <div className="dataset-metric__label">Copied</div>
@@ -107,7 +109,7 @@ export default function MethodologyPage() {
             </div>
           </div>
           <div className="freshness-card">
-            <div className="freshness-card__label">Top defense-ready</div>
+            <div className="freshness-card__label">Top composite ranking</div>
             <div className="freshness-card__value">
               {prettyDate(freshness?.topDefenseLastModified)}
             </div>
@@ -126,8 +128,8 @@ export default function MethodologyPage() {
               <div>
                 <div className="pipeline-step__title">Universe selection</div>
                 <div className="pipeline-step__text">
-                  Raw stock and ETF files are scanned and ranked by history depth,
-                  recency, and data quality to produce a curated research subset.
+                  Raw stock and ETF histories are scanned and ranked by history depth,
+                  recency, and data quality in order to form a curated research subset.
                 </div>
               </div>
             </div>
@@ -135,10 +137,13 @@ export default function MethodologyPage() {
             <div className="pipeline-step">
               <div className="pipeline-step__index">02</div>
               <div>
-                <div className="pipeline-step__title">Curated dataset materialization</div>
+                <div className="pipeline-step__title">
+                  Curated dataset materialization
+                </div>
                 <div className="pipeline-step__text">
-                  Selected instruments are copied into an isolated curated dataset,
-                  ensuring reproducible batch experiments and controlled demo scope.
+                  Selected instruments are copied into an isolated curated dataset so
+                  that subsequent experiments operate on a reproducible and controlled
+                  input universe.
                 </div>
               </div>
             </div>
@@ -148,9 +153,9 @@ export default function MethodologyPage() {
               <div>
                 <div className="pipeline-step__title">M8 suite batch execution</div>
                 <div className="pipeline-step__text">
-                  The backend runs multi-ticker suite configurations, saves suite-level
-                  summaries, ticker-level diagnostics, and post-processes them into
-                  frontend-ready indexes.
+                  The backend executes multi-ticker configurations, produces
+                  configuration-level summaries, collects ticker-level diagnostics, and
+                  exports frontend-ready indexes.
                 </div>
               </div>
             </div>
@@ -158,10 +163,12 @@ export default function MethodologyPage() {
             <div className="pipeline-step">
               <div className="pipeline-step__index">04</div>
               <div>
-                <div className="pipeline-step__title">Research terminal visualization</div>
+                <div className="pipeline-step__title">
+                  Frontend analytical interface
+                </div>
                 <div className="pipeline-step__text">
-                  The React frontend loads JSON artifacts and renders a stable analytical
-                  dashboard for comparison, interpretation, and live defense presentation.
+                  The React frontend loads published artifacts and renders a stable
+                  dashboard for comparison, interpretation, and presentation.
                 </div>
               </div>
             </div>
@@ -176,35 +183,40 @@ export default function MethodologyPage() {
             <div className="method-metric">
               <div className="method-metric__title">Return %</div>
               <div className="method-metric__text">
-                Aggregate suite-level performance indicator for a given experiment configuration.
+                Configuration-level performance indicator summarizing total strategy
+                result for a given experiment run.
               </div>
             </div>
 
             <div className="method-metric">
               <div className="method-metric__title">Sharpe</div>
               <div className="method-metric__text">
-                Risk-adjusted quality estimate showing how much performance is achieved per unit of variability.
+                Risk-adjusted indicator showing how much return is achieved per unit of
+                variability.
               </div>
             </div>
 
             <div className="method-metric">
               <div className="method-metric__title">Max Drawdown %</div>
               <div className="method-metric__text">
-                Historical worst decline observed in the strategy path. Useful for communicating downside risk.
+                Historical maximum decline observed on the strategy path, used to
+                characterize downside exposure.
               </div>
             </div>
 
             <div className="method-metric">
               <div className="method-metric__title">p-value</div>
               <div className="method-metric__text">
-                Statistical comparison indicator. High values should not be interpreted as strong superiority evidence.
+                Comparative statistical indicator. High values should not be interpreted
+                as strong evidence of stable superiority.
               </div>
             </div>
 
             <div className="method-metric">
-              <div className="method-metric__title">Defense-ready score</div>
+              <div className="method-metric__title">Composite score</div>
               <div className="method-metric__text">
-                Internal ranking heuristic used for interface ordering. It is not a substitute for formal significance claims.
+                Internal ranking metric used for interface ordering and compact
+                comparison. It does not replace formal statistical interpretation.
               </div>
             </div>
           </div>
@@ -212,30 +224,39 @@ export default function MethodologyPage() {
 
         <section className="terminal-card">
           <div className="section-label">Design principles</div>
-          <h2 className="section-title">Why the system is structured this way</h2>
+          <h2 className="section-title">System design rationale</h2>
 
           <div className="research-annotation-grid">
             <div className="research-annotation">
               <div className="research-annotation__label">Reproducibility</div>
               <div className="research-annotation__value">Controlled universe</div>
               <div className="research-annotation__text">
-                A curated subset prevents uncontrolled runtime growth and supports a stable thesis demo.
+                A curated subset limits uncontrolled runtime growth and supports a
+                stable and repeatable analytical demonstration.
               </div>
             </div>
 
             <div className="research-annotation">
-              <div className="research-annotation__label">Separation of concerns</div>
-              <div className="research-annotation__value">Backend vs frontend</div>
+              <div className="research-annotation__label">
+                Separation of concerns
+              </div>
+              <div className="research-annotation__value">
+                Backend and frontend roles
+              </div>
               <div className="research-annotation__text">
-                Heavy ML and backtesting remain in Python, while the UI focuses on interpretation and explanation.
+                Computational workloads remain in Python, while the interface focuses on
+                structured interpretation and presentation of saved outputs.
               </div>
             </div>
 
             <div className="research-annotation">
-              <div className="research-annotation__label">Defense strategy</div>
-              <div className="research-annotation__value">Precomputed demo</div>
+              <div className="research-annotation__label">
+                Demonstration stability
+              </div>
+              <div className="research-annotation__value">Precomputed artifacts</div>
               <div className="research-annotation__text">
-                This approach avoids long live computations and ensures that the interface remains responsive during presentation.
+                The system avoids heavy live calculations during a session and maintains
+                predictable responsiveness in demonstration mode.
               </div>
             </div>
           </div>
@@ -243,13 +264,14 @@ export default function MethodologyPage() {
 
         <section className="terminal-card">
           <div className="section-label">Limitations</div>
-          <h2 className="section-title">What should be stated honestly</h2>
+          <h2 className="section-title">Scope of interpretation</h2>
 
           <div className="terminal-note terminal-note--warning">
-            The current interface visualizes precomputed results on a historical dataset snapshot.
-            It demonstrates system architecture, batch experimentation, and analytical interpretation,
-            but it should not be presented as a real-time trading terminal or as proof of statistically
-            conclusive market superiority.
+            The current interface visualizes precomputed results on a historical dataset
+            snapshot. It demonstrates system architecture, experiment orchestration, and
+            analytical interpretation, but it should not be presented as a real-time
+            trading terminal or as conclusive proof of statistically stable market
+            outperformance.
           </div>
         </section>
       </div>
