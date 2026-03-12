@@ -1,8 +1,9 @@
 {
   "mode": "demo",
+  "generated_at_utc": "2026-03-12T01:57:21.656017+00:00",
   "n_suite_runs": 8,
-  "n_ticker_rows": 4000,
-  "n_unique_tickers": 500,
+  "n_ticker_rows": 68312,
+  "n_unique_tickers": 8539,
   "raw_stocks_available": 7195,
   "raw_etfs_available": 1344,
   "configs": [
