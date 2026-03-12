@@ -1511,3 +1511,57 @@ strong {
     grid-template-columns: 1fr;
   }
 }
+
+.route-error-page {
+  min-height: calc(100vh - 120px);
+  display: grid;
+  place-items: center;
+}
+
+.route-error-card {
+  width: min(980px, 100%);
+  padding: 28px;
+  border-radius: 28px;
+  border: 1px solid var(--border-strong);
+  background:
+    linear-gradient(135deg, rgba(17, 30, 56, 0.92), rgba(9, 18, 34, 0.95)),
+    radial-gradient(circle at top right, rgba(113, 231, 220, 0.10), transparent 30%);
+  box-shadow: var(--shadow-lg);
+}
+
+.route-error-card__title {
+  margin: 0;
+  font-size: 40px;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+}
+
+.route-error-card__text {
+  margin-top: 16px;
+  max-width: 760px;
+  color: var(--muted);
+  line-height: 1.75;
+}
+
+.route-error-card code {
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.route-error-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+@media (max-width: 760px) {
+  .route-error-card {
+    padding: 22px;
+    border-radius: 22px;
+  }
+
+  .route-error-card__title {
+    font-size: 30px;
+  }
+}

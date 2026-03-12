@@ -6,11 +6,13 @@ import SuiteDetailPage from "../pages/SuiteDetailPage";
 import TickerExplorerPage from "../pages/TickerExplorerPage";
 import MethodologyPage from "../pages/MethodologyPage";
 import InsightsPage from "../pages/InsightsPage";
+import RouteErrorPage from "../pages/RouteErrorPage";
 
 export const router = createBrowserRouter([
   {
     path: "/",
     element: <AppShell />,
+    errorElement: <RouteErrorPage />,
     children: [
       { index: true, element: <OverviewPage /> },
       { path: "suite-runs", element: <SuiteRunsPage /> },
