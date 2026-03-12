@@ -47,8 +47,11 @@ export default function InsightsPage() {
     const bestReturn =
       suiteRuns
         .filter((r) => typeof r.return_metric_pct === "number")
-        .sort((a, b) => (b.return_metric_pct ?? -Infinity) - (a.return_metric_pct ?? -Infinity))[0] ??
-      null;
+        .sort(
+          (a, b) =>
+            (b.return_metric_pct ?? -Infinity) -
+            (a.return_metric_pct ?? -Infinity)
+        )[0] ?? null;
 
     const bestSharpe =
       suiteRuns
@@ -56,12 +59,13 @@ export default function InsightsPage() {
         .sort((a, b) => (b.sharpe ?? -Infinity) - (a.sharpe ?? -Infinity))[0] ??
       null;
 
-    const bestDefense =
+    const bestComposite =
       suiteRuns
         .filter((r) => typeof r.defense_ready_score === "number")
         .sort(
           (a, b) =>
-            (b.defense_ready_score ?? -Infinity) - (a.defense_ready_score ?? -Infinity)
+            (b.defense_ready_score ?? -Infinity) -
+            (a.defense_ready_score ?? -Infinity)
         )[0] ?? null;
 
     const minP =
@@ -75,7 +79,8 @@ export default function InsightsPage() {
         .filter((r) => typeof r.strat_total_return === "number")
         .sort(
           (a, b) =>
-            (b.strat_total_return ?? -Infinity) - (a.strat_total_return ?? -Infinity)
+            (b.strat_total_return ?? -Infinity) -
+            (a.strat_total_return ?? -Infinity)
         )[0] ?? null;
 
     const worstTicker =
@@ -83,11 +88,14 @@ export default function InsightsPage() {
         .filter((r) => typeof r.strat_total_return === "number")
         .sort(
           (a, b) =>
-            (a.strat_total_return ?? Infinity) - (b.strat_total_return ?? Infinity)
+            (a.strat_total_return ?? Infinity) -
+            (b.strat_total_return ?? Infinity)
         )[0] ?? null;
 
     const positiveTickers = tickerRows.filter(
-      (r) => typeof r.strat_total_return === "number" && (r.strat_total_return ?? 0) > 0
+      (r) =>
+        typeof r.strat_total_return === "number" &&
+        (r.strat_total_return ?? 0) > 0
     ).length;
 
     const totalTickerRows = tickerRows.length || 1;
@@ -96,7 +104,7 @@ export default function InsightsPage() {
     return {
       bestReturn,
       bestSharpe,
-      bestDefense,
+      bestComposite,
       minP,
       bestTicker,
       worstTicker,
@@ -108,13 +116,13 @@ export default function InsightsPage() {
     <div className="page">
       <section className="section-hero">
         <div className="section-hero__content">
-          <div className="section-label">Research conclusions</div>
-          <h1 className="section-hero__title">Insights</h1>
+          <div className="section-label">Analytical conclusions</div>
+          <h1 className="section-hero__title">Comparative Interpretation</h1>
           <p className="section-hero__text">
-            This screen transforms loaded JSON artifacts into presentation-friendly analytical
-            conclusions. It is intended as the narrative layer of the system: what the
-            current results suggest, what they do not prove, and how the interface should be
-            explained during defense.
+            This section synthesizes the current suite-level and instrument-level
+            outputs into compact analytical conclusions. The goal is to present what
+            the loaded snapshot indicates, how configurations differ from one another,
+            and where statistical caution remains necessary.
           </p>
         </div>
 
@@ -134,54 +142,54 @@ export default function InsightsPage() {
         </div>
       </section>
 
-      {loading ? <div className="empty-state">Loading insights…</div> : null}
+      {loading ? <div className="empty-state">Loading analytical conclusions…</div> : null}
 
       <div className="insight-story-grid">
         <section className="terminal-card terminal-card--featured">
-          <div className="section-label">Primary conclusion</div>
-          <h2 className="section-title">Best raw suite return</h2>
+          <div className="section-label">Configuration ranking</div>
+          <h2 className="section-title">Best return configuration</h2>
           <div className="insight-story-value">{insights.bestReturn?.config ?? "—"}</div>
           <p className="section-text">
-            This configuration currently shows the highest loaded suite-level return:
-            {" "}
-            <strong>{fmt(insights.bestReturn?.return_metric_pct)}%</strong>.
-            It should be presented as the strongest raw performance result in the current
-            curated snapshot, not as unconditional proof of robust superiority.
+            The highest suite-level return in the current snapshot is{" "}
+            <strong>{fmt(insights.bestReturn?.return_metric_pct)}%</strong>. This
+            configuration represents the strongest absolute performance result within
+            the loaded registry.
           </p>
         </section>
 
         <section className="terminal-card">
-          <div className="section-label">Risk-adjusted conclusion</div>
-          <h2 className="section-title">Best sharpe profile</h2>
+          <div className="section-label">Risk-adjusted ranking</div>
+          <h2 className="section-title">Best Sharpe configuration</h2>
           <div className="insight-story-value">{insights.bestSharpe?.config ?? "—"}</div>
           <p className="section-text">
-            The strongest loaded risk-adjusted profile is currently associated with sharpe
-            {" "}
-            <strong>{fmt(insights.bestSharpe?.sharpe, 4)}</strong>.
-            This is useful when explaining why raw return alone is not enough.
+            The strongest risk-adjusted profile is associated with Sharpe{" "}
+            <strong>{fmt(insights.bestSharpe?.sharpe, 4)}</strong>. This helps
+            distinguish raw return leadership from more balanced performance.
           </p>
         </section>
 
         <section className="terminal-card">
-          <div className="section-label">Heuristic ranking</div>
-          <h2 className="section-title">Defense-ready leader</h2>
-          <div className="insight-story-value">{insights.bestDefense?.config ?? "—"}</div>
+          <div className="section-label">Composite ranking</div>
+          <h2 className="section-title">Best composite score configuration</h2>
+          <div className="insight-story-value">
+            {insights.bestComposite?.config ?? "—"}
+          </div>
           <p className="section-text">
-            The interface ranking currently prioritizes this configuration with score
-            {" "}
-            <strong>{fmt(insights.bestDefense?.defense_ready_score, 3)}</strong>.
-            This should be described as an internal presentation heuristic.
+            The highest composite score in the current interface is{" "}
+            <strong>{fmt(insights.bestComposite?.defense_ready_score, 3)}</strong>.
+            This is an internal ordering signal intended for compact comparative
+            ranking rather than a standalone scientific conclusion.
           </p>
         </section>
 
         <section className="terminal-card terminal-note terminal-note--warning">
-          <div className="section-label">Statistical caution</div>
-          <h2 className="section-title">What the system does not prove</h2>
+          <div className="section-label">Statistical interpretation</div>
+          <h2 className="section-title">Limits of evidence</h2>
           <p className="section-text">
-            The minimum loaded one-sided p-value is <strong>{fmt(insights.minP, 4)}</strong>.
-            Unless this value becomes convincingly low, the results should be presented as
-            promising comparative outputs inside a research system, not as conclusive evidence
-            of stable market outperformance.
+            The minimum one-sided p-value in the loaded suite registry is{" "}
+            <strong>{fmt(insights.minP, 4)}</strong>. This metric should be treated as
+            a comparative diagnostic, not as unconditional proof of stable market
+            outperformance.
           </p>
         </section>
       </div>
@@ -189,40 +197,39 @@ export default function InsightsPage() {
       <div className="insight-story-grid">
         <section className="terminal-card">
           <div className="section-label">Instrument highlight</div>
-          <h2 className="section-title">Best ticker result</h2>
+          <h2 className="section-title">Strongest visible instrument result</h2>
           <div className="insight-story-value">{insights.bestTicker?.ticker ?? "—"}</div>
           <p className="section-text">
-            Observed under <strong>{insights.bestTicker?.config ?? "—"}</strong> with return
-            {" "}
-            <strong>{fmt(insights.bestTicker?.strat_total_return)}%</strong>.
+            Observed under <strong>{insights.bestTicker?.config ?? "—"}</strong> with
+            return <strong>{fmt(insights.bestTicker?.strat_total_return)}%</strong>.
           </p>
         </section>
 
         <section className="terminal-card">
-          <div className="section-label">Risk highlight</div>
-          <h2 className="section-title">Worst ticker result</h2>
+          <div className="section-label">Instrument risk</div>
+          <h2 className="section-title">Weakest visible instrument result</h2>
           <div className="insight-story-value">{insights.worstTicker?.ticker ?? "—"}</div>
           <p className="section-text">
-            Observed under <strong>{insights.worstTicker?.config ?? "—"}</strong> with return
-            {" "}
-            <strong>{fmt(insights.worstTicker?.strat_total_return)}%</strong>.
+            Observed under <strong>{insights.worstTicker?.config ?? "—"}</strong> with
+            return <strong>{fmt(insights.worstTicker?.strat_total_return)}%</strong>.
           </p>
         </section>
 
         <section className="terminal-card">
           <div className="section-label">Coverage signal</div>
-          <h2 className="section-title">Positive ticker share</h2>
+          <h2 className="section-title">Positive instrument share</h2>
           <div className="insight-story-value">{fmt(insights.positiveShare)}%</div>
           <p className="section-text">
-            This approximates how much of the loaded per-ticker registry remains above zero.
-            It helps explain whether strong results are broad-based or concentrated.
+            This indicator approximates the share of loaded ticker-level rows with a
+            positive strategy outcome. It helps assess whether visible performance is
+            broad-based or concentrated in a narrower subset of instruments.
           </p>
         </section>
       </div>
 
       <section className="terminal-card terminal-card--featured">
-        <div className="section-label">Recommended defense narrative</div>
-        <h2 className="section-title">How to talk about ThothMind</h2>
+        <div className="section-label">Interpretation framework</div>
+        <h2 className="section-title">How to read the current snapshot</h2>
 
         <div className="pipeline-flow">
           <div className="pipeline-step">
@@ -230,8 +237,8 @@ export default function InsightsPage() {
             <div>
               <div className="pipeline-step__title">Start from architecture</div>
               <div className="pipeline-step__text">
-                Emphasize that the system is offline-first: Python computes experiments,
-                React interprets them.
+                The backend performs precomputed experiment execution, while the
+                frontend provides structured inspection of saved analytical outputs.
               </div>
             </div>
           </div>
@@ -239,9 +246,10 @@ export default function InsightsPage() {
           <div className="pipeline-step">
             <div className="pipeline-step__index">02</div>
             <div>
-              <div className="pipeline-step__title">Show aggregate intelligence</div>
+              <div className="pipeline-step__title">Compare configurations</div>
               <div className="pipeline-step__text">
-                Present suite-level returns, sharpe, drawdown, and defense-ready ranking.
+                Suite-level metrics show how experiment variants differ by return,
+                Sharpe, drawdown, and internal ranking score.
               </div>
             </div>
           </div>
@@ -249,10 +257,10 @@ export default function InsightsPage() {
           <div className="pipeline-step">
             <div className="pipeline-step__index">03</div>
             <div>
-              <div className="pipeline-step__title">Go deeper into explainability</div>
+              <div className="pipeline-step__title">Inspect instrument dispersion</div>
               <div className="pipeline-step__text">
-                Use Suite Detail and Ticker Explorer to show that results can be inspected,
-                not just displayed.
+                Ticker-level outputs reveal whether visible results are distributed
+                across the universe or concentrated in a limited subset.
               </div>
             </div>
           </div>
@@ -260,10 +268,11 @@ export default function InsightsPage() {
           <div className="pipeline-step">
             <div className="pipeline-step__index">04</div>
             <div>
-              <div className="pipeline-step__title">End with scientific honesty</div>
+              <div className="pipeline-step__title">Preserve statistical caution</div>
               <div className="pipeline-step__text">
-                Clarify that the system demonstrates architecture, experimentation, and
-                interpretation — while statistical superiority still requires caution.
+                Current results should be interpreted as analytical evidence inside a
+                historical research snapshot, not as a real-time guarantee of market
+                superiority.
               </div>
             </div>
           </div>

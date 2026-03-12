@@ -26,20 +26,27 @@ export default function SuiteRunsPage() {
   const stats = useMemo(() => {
     const configs = new Set(rows.map((r) => r.config)).size;
     const stages = new Set(rows.map((r) => r.stage)).size;
-    const maxUniverse = rows.reduce((acc, row) => Math.max(acc, row.n_suite_tickers || 0), 0);
+    const maxUniverse = rows.reduce(
+      (acc, row) => Math.max(acc, row.n_suite_tickers || 0),
+      0
+    );
 
     const bestReturnRow =
       rows
         .filter((r) => typeof r.return_metric_pct === "number")
-        .sort((a, b) => (b.return_metric_pct ?? -Infinity) - (a.return_metric_pct ?? -Infinity))[0] ??
-      null;
+        .sort(
+          (a, b) =>
+            (b.return_metric_pct ?? -Infinity) -
+            (a.return_metric_pct ?? -Infinity)
+        )[0] ?? null;
 
-    const bestDefenseRow =
+    const bestCompositeRow =
       rows
         .filter((r) => typeof r.defense_ready_score === "number")
         .sort(
           (a, b) =>
-            (b.defense_ready_score ?? -Infinity) - (a.defense_ready_score ?? -Infinity)
+            (b.defense_ready_score ?? -Infinity) -
+            (a.defense_ready_score ?? -Infinity)
         )[0] ?? null;
 
     return {
@@ -47,7 +54,7 @@ export default function SuiteRunsPage() {
       stages,
       maxUniverse,
       bestReturnRow,
-      bestDefenseRow,
+      bestCompositeRow,
     };
   }, [rows]);
 
@@ -56,11 +63,12 @@ export default function SuiteRunsPage() {
       <section className="section-hero">
         <div className="section-hero__content">
           <div className="section-label">Experiment registry</div>
-          <h1 className="section-hero__title">Suite Runs</h1>
+          <h1 className="section-hero__title">Experiment Registry</h1>
           <p className="section-hero__text">
-            Compare suite-level results across curated-universe configurations, forecasting
-            horizons, and ranking heuristics. This screen is intended to act as the main
-            experiment registry for the thesis defense demo.
+            Compare suite-level results across curated-universe configurations,
+            forecasting stages, and ranking outputs. This section acts as the main
+            registry of saved experiment runs inside the current analytical
+            snapshot.
           </p>
         </div>
 
@@ -93,22 +101,22 @@ export default function SuiteRunsPage() {
         </div>
 
         <div className="metrics-strip__card">
-          <div className="metrics-strip__label">Best defense-ready configuration</div>
+          <div className="metrics-strip__label">Best composite score</div>
           <div className="metrics-strip__title">
-            {stats.bestDefenseRow?.config ?? "—"}
+            {stats.bestCompositeRow?.config ?? "—"}
           </div>
           <div className="metrics-strip__meta">
-            Score {fmt(stats.bestDefenseRow?.defense_ready_score, 3)} • p-value{" "}
-            {fmt(stats.bestDefenseRow?.p_value_one_sided, 4)}
+            Score {fmt(stats.bestCompositeRow?.defense_ready_score, 3)} • p-value{" "}
+            {fmt(stats.bestCompositeRow?.p_value_one_sided, 4)}
           </div>
         </div>
       </div>
 
       {loading ? (
-        <div className="empty-state">Loading suite runs…</div>
+        <div className="empty-state">Loading experiment registry…</div>
       ) : rows.length === 0 ? (
         <div className="empty-state">
-          No suite-level results found in <code>public/data/index/all_results_index.json</code>
+          No suite-level results were found in the published snapshot.
         </div>
       ) : (
         <SuiteRunsTable rows={rows} />

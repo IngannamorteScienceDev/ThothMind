@@ -81,7 +81,8 @@ export default function TickerExplorerPage() {
         .filter((r) => typeof r.strat_total_return === "number")
         .sort(
           (a, b) =>
-            (b.strat_total_return ?? -Infinity) - (a.strat_total_return ?? -Infinity)
+            (b.strat_total_return ?? -Infinity) -
+            (a.strat_total_return ?? -Infinity)
         )[0] ?? null;
 
     const worstTicker =
@@ -89,7 +90,8 @@ export default function TickerExplorerPage() {
         .filter((r) => typeof r.strat_total_return === "number")
         .sort(
           (a, b) =>
-            (a.strat_total_return ?? Infinity) - (b.strat_total_return ?? Infinity)
+            (a.strat_total_return ?? Infinity) -
+            (b.strat_total_return ?? Infinity)
         )[0] ?? null;
 
     return {
@@ -105,12 +107,13 @@ export default function TickerExplorerPage() {
     <div className="page">
       <section className="section-hero">
         <div className="section-hero__content">
-          <div className="section-label">Instrument diagnostics</div>
-          <h1 className="section-hero__title">Ticker Explorer</h1>
+          <div className="section-label">Instrument analytics</div>
+          <h1 className="section-hero__title">Instrument Analytics</h1>
           <p className="section-hero__text">
-            Explore per-ticker outputs inside multi-ticker suite runs. Use this view to compare
-            instruments, inspect configuration sensitivity, and demonstrate that the system stores
-            interpretable diagnostics beyond aggregate suite-level metrics.
+            Explore ticker-level results generated inside multi-ticker suite runs.
+            This screen is intended for instrument comparison, configuration
+            sensitivity analysis, and interpretation of per-instrument performance
+            dispersion beyond aggregate suite-level metrics.
           </p>
         </div>
 
@@ -120,7 +123,7 @@ export default function TickerExplorerPage() {
             <div className="mini-stat__value">{filtered.length}</div>
           </div>
           <div className="mini-stat">
-            <div className="mini-stat__label">Tickers</div>
+            <div className="mini-stat__label">Instruments</div>
             <div className="mini-stat__value">{stats.uniqueTickers}</div>
           </div>
           <div className="mini-stat">
@@ -132,21 +135,32 @@ export default function TickerExplorerPage() {
 
       <div className="metrics-strip">
         <div className="metrics-strip__card">
-          <div className="metrics-strip__label">Average sharpe</div>
+          <div className="metrics-strip__label">Average Sharpe</div>
           <div className="metrics-strip__title">{fmt(stats.avgSharpe, 4)}</div>
           <div className="metrics-strip__meta">
-            Calculated over currently filtered per-ticker rows
+            Calculated over the currently filtered ticker-level rows
           </div>
         </div>
 
         <div className="metrics-strip__card">
-          <div className="metrics-strip__label">Best visible ticker</div>
+          <div className="metrics-strip__label">Best visible instrument</div>
           <div className="metrics-strip__title">
             {stats.bestTicker?.ticker ?? "—"}
           </div>
           <div className="metrics-strip__meta">
             {stats.bestTicker?.config ?? "—"} • Return{" "}
-            {fmt(stats.bestTicker?.strat_total_return)}
+            {fmt(stats.bestTicker?.strat_total_return)}%
+          </div>
+        </div>
+
+        <div className="metrics-strip__card">
+          <div className="metrics-strip__label">Weakest visible instrument</div>
+          <div className="metrics-strip__title">
+            {stats.worstTicker?.ticker ?? "—"}
+          </div>
+          <div className="metrics-strip__meta">
+            {stats.worstTicker?.config ?? "—"} • Return{" "}
+            {fmt(stats.worstTicker?.strat_total_return)}%
           </div>
         </div>
       </div>
@@ -154,7 +168,7 @@ export default function TickerExplorerPage() {
       <div className="toolbar toolbar--terminal">
         <input
           className="search-input"
-          placeholder="Filter by ticker or config…"
+          placeholder="Filter by instrument or configuration…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -188,7 +202,9 @@ export default function TickerExplorerPage() {
         {comparisonTicker ? (
           <TickerConfigComparisonChart rows={comparisonRows} ticker={comparisonTicker} />
         ) : (
-          <div className="empty-state">No ticker selected for configuration comparison.</div>
+          <div className="empty-state">
+            No instrument is available for configuration comparison.
+          </div>
         )}
 
         <TickerReturnDistributionChart rows={filtered} />
@@ -196,40 +212,44 @@ export default function TickerExplorerPage() {
 
       <div className="insight-grid">
         <section className="terminal-card">
-          <div className="section-label">Research insight</div>
+          <div className="section-label">Analytical note</div>
           <h2 className="section-title">Configuration sensitivity</h2>
           <p className="section-text">
-            The comparison block above is intended to show how the same instrument behaves
-            under different suite configurations. This is useful for demonstrating that the
-            system stores structured diagnostics rather than only one aggregate leaderboard.
+            The comparison chart shows how the same instrument behaves under
+            different suite configurations. This is useful for demonstrating that
+            the system stores interpretable instrument-level diagnostics rather than
+            only a single aggregate ranking.
           </p>
         </section>
 
         <section className="terminal-card">
-          <div className="section-label">Research insight</div>
+          <div className="section-label">Analytical note</div>
           <h2 className="section-title">Distribution interpretation</h2>
           <p className="section-text">
-            The histogram reveals whether performance is concentrated in a narrow set of
-            instruments or distributed more evenly across the filtered universe. This helps
-            distinguish broad robustness from isolated winners.
+            The return distribution chart helps assess whether visible instrument
+            results are concentrated in a limited subset or spread more broadly
+            across the filtered universe.
           </p>
         </section>
 
         <section className="terminal-card">
           <div className="section-label">Risk note</div>
-          <h2 className="section-title">Worst visible ticker</h2>
+          <h2 className="section-title">Current weakest visible instrument</h2>
           <p className="section-text">
-            {(stats.worstTicker?.ticker ?? "—")} under {(stats.worstTicker?.config ?? "—")} currently
-            shows return {fmt(stats.worstTicker?.strat_total_return)} and drawdown{" "}
-            {fmt(stats.worstTicker?.strat_max_drawdown)}.
+            {(stats.worstTicker?.ticker ?? "—")} under{" "}
+            {(stats.worstTicker?.config ?? "—")} currently shows return{" "}
+            {fmt(stats.worstTicker?.strat_total_return)}% and drawdown{" "}
+            {fmt(stats.worstTicker?.strat_max_drawdown)}%.
           </p>
         </section>
       </div>
 
       {loading ? (
-        <div className="empty-state">Loading per-ticker results…</div>
+        <div className="empty-state">Loading instrument-level results…</div>
       ) : filtered.length === 0 ? (
-        <div className="empty-state">No per-ticker rows found for current filters.</div>
+        <div className="empty-state">
+          No ticker-level rows found for the current filters.
+        </div>
       ) : (
         <TickerResultsTable rows={filtered} />
       )}
