@@ -2,11 +2,7 @@
 
 > **PROPRIETARY / VIEW-ONLY:** No license is granted. All rights reserved. See `LICENSE` for details.
 
-**ThothMind** is a diploma-grade machine learning and analytical platform for **U.S. stock market analysis, experiment execution, and decision-support-oriented forecasting research**.
-
-The project is built around the thesis topic:
-
-> **Development of an intelligent stock market analysis and forecasting system for investment decision support**
+**ThothMind** is a portfolio-grade machine learning and analytical platform for **U.S. stock market analysis, experiment execution, and decision-support-oriented forecasting research**.
 
 ThothMind is designed not as a toy notebook or a one-off dashboard, but as a **structured research platform** with:
 
@@ -15,6 +11,22 @@ ThothMind is designed not as a toy notebook or a one-off dashboard, but as a **s
 - a **batch pipeline** for configuration-based execution,
 - a **React + Vite frontend** for analytical inspection and presentation,
 - a strict split between **real research artifacts** and **synthetic public demo artifacts**.
+
+---
+
+## What this project demonstrates
+
+ThothMind is structured as an end-to-end engineering case rather than a standalone notebook.
+
+It demonstrates:
+
+- **Python data engineering** for historical market datasets,
+- **machine learning experimentation** with configurable research runs,
+- **walk-forward validation** and statistical result checks,
+- **artifact-based analytics** with reproducible JSON outputs,
+- **React + Vite frontend development** for analytical inspection,
+- **separation of real research data and public demo data**,
+- **clear project packaging** for technical review and portfolio presentation.
 
 ---
 
@@ -31,17 +43,17 @@ ThothMind is designed not as a toy notebook or a one-off dashboard, but as a **s
 
 ## Why this project exists
 
-ThothMind solves a practical presentation and engineering problem:
+ThothMind solves a practical research and engineering problem:
 
-- raw market research pipelines are usually too heavy and too messy for a polished diploma demo,
-- purely visual dashboards often look attractive but lack real backend substance,
-- real experiment artifacts and public demo assets often need different data strategies.
+- raw market research pipelines are often too heavy for quick review,
+- purely visual dashboards can look attractive while lacking real backend substance,
+- real experiment artifacts and public demo assets require different data strategies.
 
 This platform bridges those needs by combining:
 
 - **real offline backend computation**,
 - **artifact-based analytical inspection**,
-- **clean frontend presentation**,
+- **clean frontend analytical presentation**,
 - **demo/research data mode separation**.
 
 ---
@@ -55,7 +67,7 @@ This platform bridges those needs by combining:
 - **Suite-level and ticker-level result indexing**
 - **Research artifact publishing into frontend**
 - **Synthetic interface snapshot generation for public demo**
-- **Commission-ready analytical frontend**
+- **Polished analytical frontend**
 - **Safe cleanup and rebuild workflow**
 
 ---
@@ -133,7 +145,7 @@ frontend/public/data/research/
 
 Purpose:
 
-- thesis defense,
+- technical review,
 - real experiment inspection,
 - configuration comparison,
 - evidence-based analytical presentation.
@@ -152,7 +164,7 @@ Purpose:
 
 - GitHub Pages / public showcase,
 - lightweight click-through demo,
-- stable UI presentation without heavy backend recomputation.
+- stable UI showcase without heavy backend recomputation.
 
 ### Important distinction
 
@@ -254,24 +266,39 @@ Current emphasis:
 - curated research subset workflow,
 - real research artifact publication,
 - synthetic demo snapshot generation,
-- commission-ready frontend presentation,
+- portfolio-ready frontend presentation,
 - safe repository cleanup and packaging.
 
-This repository should now be understood as a **coherent diploma platform**, not as a loose collection of notebooks or isolated ML experiments.
+This repository should be understood as a **coherent research engineering platform**, not as a loose collection of notebooks or isolated ML experiments.
 
 ---
 
 ## Repository highlights
 
-- `thothmind/` — active backend package
-- `scripts/run_all_experiments.py` — current main experiment runner
-- `scripts/select_research_universe.py` — universe selection
-- `scripts/materialize_curated_universe.py` — curated subset creation
-- `scripts/publish_frontend_snapshot.py` — research snapshot publication
-- `scripts/generate_demo_frontend_snapshot.py` — synthetic demo snapshot generation
-- `scripts/clean_generated_artifacts.py` — safe cleanup utility
-- `frontend/` — analytical dashboard
-- `configs/` — experiment configuration files
+- `thothmind/` - active backend package
+- `scripts/run_all_experiments.py` - current main experiment runner
+- `scripts/select_research_universe.py` - universe selection
+- `scripts/materialize_curated_universe.py` - curated subset creation
+- `scripts/publish_frontend_snapshot.py` - research snapshot publication
+- `scripts/generate_demo_frontend_snapshot.py` - synthetic demo snapshot generation
+- `scripts/clean_generated_artifacts.py` - safe cleanup utility
+- `frontend/` - analytical dashboard
+- `configs/` - experiment configuration files
+
+---
+
+## For reviewers
+
+If you are reviewing this repository as a portfolio project, the most relevant parts are:
+
+- `thothmind/` for the backend package structure,
+- `scripts/run_all_experiments.py` for batch experiment orchestration,
+- `configs/exp_m8*.yaml` for configurable experiment execution,
+- `frontend/` for the analytical React interface,
+- `frontend/public/data/demo/` for a lightweight public UI snapshot,
+- `reports/index/` and `reports/showcase/` for generated research artifacts.
+
+The project is best read as a **research engineering platform**: it combines financial time series data, ML experiments, statistical interpretation, artifact publishing, and a frontend analytical layer.
 
 ---
 
@@ -279,8 +306,9 @@ This repository should now be understood as a **coherent diploma platform**, not
 
 This repository is useful for:
 
-- thesis defense and academic demonstration,
+- technical review,
 - portfolio presentation,
+- research demonstration,
 - structured ML / analytics engineering review,
 - frontend-backend integration showcase,
 - experiment artifact inspection.
@@ -328,7 +356,7 @@ ThothMind was created as an integrated system for:
 - comparing configuration-level and ticker-level performance,
 - aggregating analytical results into reusable JSON artifacts,
 - publishing these artifacts into a frontend dashboard,
-- presenting the system in a polished, defense-ready format.
+- presenting the system in a polished, review-ready format.
 
 The emphasis of the current platform version is **stabilization, packaging, and demonstration quality**, not unbounded research sprawl.
 
@@ -416,14 +444,14 @@ This design keeps the system both:
 
 The repository contains historical and legacy traces from earlier research stages, but the **current active execution path** is:
 
-- `thothmind/` — active backend package layer
-- `scripts/run_all_experiments.py` — main batch experiment runner
-- `scripts/select_research_universe.py` — curated-universe selector
-- `scripts/materialize_curated_universe.py` — curated subset materializer
-- `scripts/publish_frontend_snapshot.py` — real artifact publisher to frontend
-- `scripts/generate_demo_frontend_snapshot.py` — synthetic demo snapshot generator
-- `scripts/clean_generated_artifacts.py` — safe project cleanup tool
-- `frontend/` — React + Vite analytical dashboard
+- `thothmind/` - active backend package layer
+- `scripts/run_all_experiments.py` - main batch experiment runner
+- `scripts/select_research_universe.py` - curated-universe selector
+- `scripts/materialize_curated_universe.py` - curated subset materializer
+- `scripts/publish_frontend_snapshot.py` - real artifact publisher to frontend
+- `scripts/generate_demo_frontend_snapshot.py` - synthetic demo snapshot generator
+- `scripts/clean_generated_artifacts.py` - safe project cleanup tool
+- `frontend/` - React + Vite analytical dashboard
 
 The frontend is intentionally separated from live model execution.  
 Heavy computation happens in Python; the frontend is a presentation and analytical inspection layer.
@@ -505,7 +533,7 @@ Typical fields:
 - `sharpe`
 - `max_drawdown_pct`
 - `p_value_one_sided`
-- `defense_ready_score`  
+- `composite_score`  
   in frontend presentation this is displayed more neutrally as **Composite Score**
 
 ### 2. Ticker-level results
@@ -857,7 +885,7 @@ After a successful run and postprocessing, the script populates:
 reports/index/all_results_index.json
 reports/index/suite_ticker_results_index.json
 reports/showcase/top10_by_return/top10_by_return.json
-reports/showcase/top10_by_return/top10_defense_ready.json
+reports/showcase/top10_by_return/top10_composite_score.json
 ```
 
 These are the key inputs for frontend publication.
@@ -985,7 +1013,7 @@ The script expects the following files to exist:
 reports/index/all_results_index.json
 reports/index/suite_ticker_results_index.json
 reports/showcase/top10_by_return.json       OR reports/showcase/top10_by_return/top10_by_return.json
-reports/showcase/top10_defense_ready.json   OR reports/showcase/top10_by_return/top10_defense_ready.json
+reports/showcase/top10_composite_score.json   OR reports/showcase/top10_by_return/top10_composite_score.json
 curated_manifest.json
 ```
 
@@ -995,7 +1023,7 @@ curated_manifest.json
 frontend/public/data/research/index/all_results_index.json
 frontend/public/data/research/index/suite_ticker_results_index.json
 frontend/public/data/research/showcase/top10_by_return.json
-frontend/public/data/research/showcase/top10_defense_ready.json
+frontend/public/data/research/showcase/top10_composite_score.json
 frontend/public/data/research/meta/curated_manifest.json
 frontend/public/data/research/meta/publish_overview.json
 ```
@@ -1067,7 +1095,7 @@ python -m scripts.generate_demo_frontend_snapshot `
 frontend/public/data/demo/index/all_results_index.json
 frontend/public/data/demo/index/suite_ticker_results_index.json
 frontend/public/data/demo/showcase/top10_by_return.json
-frontend/public/data/demo/showcase/top10_defense_ready.json
+frontend/public/data/demo/showcase/top10_composite_score.json
 frontend/public/data/demo/meta/curated_manifest.json
 frontend/public/data/demo/meta/demo_overview.json
 frontend/public/data/demo/meta/selected_tickers_preview.json
@@ -1106,7 +1134,7 @@ reports/index/
 ```text
 reports/showcase/top10_by_return/
   top10_by_return.json
-  top10_defense_ready.json
+  top10_composite_score.json
 ```
 
 ### Universe selection reports
@@ -1417,7 +1445,7 @@ Relative return against a benchmark or benchmark-like comparison layer, dependin
 Statistical comparison signal used for interpretation.  
 This should not be overclaimed.
 
-### `defense_ready_score`
+### `composite_score`
 Internal composite ranking metric.  
 In the frontend this is intentionally presented more neutrally as **Composite Score**.
 
@@ -1435,7 +1463,7 @@ Important limits:
 4. **Research mode reflects the currently published artifact snapshot, not a live brokerage connection.**
 5. **The frontend is an analytical dashboard, not a real-time trading terminal.**
 
-This is important both academically and ethically.
+This is important both researchally and ethically.
 
 ---
 
@@ -1544,7 +1572,7 @@ The current platform direction prioritizes:
 - clarity,
 - artifact publication,
 - frontend presentation quality,
-- defense-readiness,
+- review-readiness,
 - controlled compute scope.
 
 ### Historical note
@@ -1567,7 +1595,7 @@ The frontend is intentionally built as a **serious analytical interface**:
 
 ## Disclaimer
 
-ThothMind is an academic and engineering project created for research, experimentation, and demonstration purposes.
+ThothMind is an engineering and research project created for research, experimentation, and demonstration purposes.
 
 It is **not** financial advice, not a brokerage system, and not a production trading engine.
 
